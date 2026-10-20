@@ -97,8 +97,9 @@
     })();
 
     async function loadUsers() {
-      const [usersRes, reportsRes, bountiesRes, eventsRes] = await Promise.all([
+      const [usersRes, tiersRes, reportsRes, bountiesRes, eventsRes] = await Promise.all([
         db.functions.invoke('list-users').catch(() => ({ data: null })),
+        db.from('profiles').select('id, subscription_tier').limit(2000),
         db.from('reports').select('type, target_id').limit(5000),
         db.from('bounties').select('id, poster_id').limit(5000),
         db.from('events').select('id, organizer_id').limit(5000),
@@ -113,7 +114,13 @@
         raw = res.data || [];
       }
 
-      allUsers = (Array.isArray(raw) ? raw : (raw?.users || [])).filter(u => !u.is_admin && !u.isAdmin);
+      // Build tier map from profiles so edge-function results also get their tier
+      const tierMap = {};
+      (tiersRes.data || []).forEach(p => { if (p.subscription_tier) tierMap[p.id] = p.subscription_tier; });
+
+      allUsers = (Array.isArray(raw) ? raw : (raw?.users || []))
+        .filter(u => !u.is_admin && !u.isAdmin)
+        .map(u => ({ ...u, subscription_tier: u.subscription_tier || tierMap[u.id] || 'free' }));
 
       // Build report count map
       const bountyOwner = {};
