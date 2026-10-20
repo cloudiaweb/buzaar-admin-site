@@ -62,7 +62,7 @@
       const { data, error } = await db
         .from('reports')
         .select(`
-          id, reported_type, reported_id, reason, details, status, admin_note, created_at, resolved_at,
+          id, reported_type:type, reported_id:target_id, reason, details, status, admin_note, created_at, resolved_at,
           reporter:profiles!reported_by(id, display_name, handle),
           resolver:profiles!resolved_by(id, display_name)
         `)
