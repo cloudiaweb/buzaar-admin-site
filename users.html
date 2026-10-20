@@ -13,6 +13,14 @@
     <div class="page-title">Users</div>
     <div class="page-subtitle" id="user-count">Loading…</div>
 
+    <div class="tabs" id="tier-tabs" style="margin-bottom:14px">
+      <button class="tab active" data-tier="all">All</button>
+      <button class="tab" data-tier="free">Free</button>
+      <button class="tab" data-tier="collector_plus">Collector+</button>
+      <button class="tab" data-tier="organizer">Organizer</button>
+      <button class="tab" data-tier="organizer_plus">Organizer+</button>
+    </div>
+
     <div class="search-wrap">
       <span class="search-icon">🔍</span>
       <input type="text" id="search" placeholder="Search by name, handle, or email…">
@@ -27,14 +35,15 @@
               <th>User</th>
               <th>Email</th>
               <th>Joined</th>
-              <th>Organizer</th>
+              <th>Account Type</th>
               <th>Credits</th>
+              <th>Reports</th>
               <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody id="users-body">
-            <tr><td colspan="7"><div class="loading"><div class="spinner"></div></div></td></tr>
+            <tr><td colspan="8"><div class="loading"><div class="spinner"></div></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -77,6 +86,8 @@
     let creditTarget = null;
     const creditUserMap = {};
     let currentPage = 1, pageSize = 10;
+    let tierFilter = 'all';
+    let reportCountMap = {};
 
     (async () => {
       const admin = await requireAdmin();
@@ -86,26 +97,46 @@
     })();
 
     async function loadUsers() {
-      const { data, error } = await db.functions.invoke('list-users').catch(() => ({ data: null }));
+      const [usersRes, reportsRes, bountiesRes, eventsRes] = await Promise.all([
+        db.functions.invoke('list-users').catch(() => ({ data: null })),
+        db.from('reports').select('type, target_id').limit(5000),
+        db.from('bounties').select('id, poster_id').limit(5000),
+        db.from('events').select('id, organizer_id').limit(5000),
+      ]);
 
-      let raw = data;
+      let raw = usersRes.data;
       if (!raw) {
         const res = await db.from('profiles')
-          .select('id, display_name, handle, email, organizer_status, is_admin, is_banned, paid_credits, avatar_color, photo_url, created_at')
+          .select('id, display_name, handle, email, organizer_status, is_admin, is_banned, paid_credits, avatar_color, photo_url, created_at, subscription_tier')
           .eq('is_admin', false)
           .order('created_at', { ascending: false });
         raw = res.data || [];
       }
 
       allUsers = (Array.isArray(raw) ? raw : (raw?.users || [])).filter(u => !u.is_admin && !u.isAdmin);
+
+      // Build report count map
+      const bountyOwner = {};
+      (bountiesRes.data || []).forEach(b => { if (b.poster_id) bountyOwner[b.id] = b.poster_id; });
+      const eventOwner = {};
+      (eventsRes.data || []).forEach(e => { if (e.organizer_id) eventOwner[e.id] = e.organizer_id; });
+      reportCountMap = {};
+      (reportsRes.data || []).forEach(r => {
+        let uid = null;
+        if (r.type === 'profile') uid = r.target_id;
+        else if (r.type === 'bounty') uid = bountyOwner[r.target_id];
+        else if (r.type === 'event') uid = eventOwner[r.target_id];
+        if (uid) reportCountMap[uid] = (reportCountMap[uid] || 0) + 1;
+      });
+
       document.getElementById('user-count').textContent = `${allUsers.length} users total`;
-      renderTable(allUsers);
+      renderTable(filterUsers());
     }
 
     function renderTable(users) {
       const tbody = document.getElementById('users-body');
       if (users.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><h3>No users found</h3></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><h3>No users found</h3></div></td></tr>';
         renderPagination('pagination', 1, 1, 0, pageSize, 'gotoPage', 'setPageSize');
         return;
       }
@@ -123,16 +154,27 @@
         const joined  = formatDate(u.created_at || u.createdAt);
         const isBanned= u.is_banned || u.isBanned;
         const orgSt   = u.organizer_status || u.organizerStatus || 'none';
+        const tier    = u.subscription_tier || u.subscriptionTier || 'free';
         const paid    = u.paid_credits   ?? u.paidCredits   ?? 0;
         const bg      = avatarBg(name);
         const photo   = u.photo_url || null;
+        const rCount  = reportCountMap[id] || 0;
 
-        const orgBadge = {
-          verified: '<span class="badge badge-teal">✓ Organizer</span>',
-          pending:  '<span class="badge badge-amber">⏳ Pending</span>',
-          rejected: '<span class="badge badge-red">✗ Rejected</span>',
-          none:     '<span class="badge badge-muted">None</span>',
-        }[orgSt] || '<span class="badge badge-muted">None</span>';
+        const tierBadge = tier === 'organizer_plus'
+          ? '<span class="badge" style="background:rgba(168,85,247,0.12);color:#a855f7;border-color:rgba(168,85,247,0.3)">Organizer+</span>'
+          : tier === 'collector_plus'
+            ? '<span class="badge badge-primary">Collector+</span>'
+            : '<span class="badge badge-muted">Free</span>';
+
+        const orgLine = orgSt === 'verified'
+          ? '<span class="badge badge-teal" style="font-size:10px;margin-top:3px">✓ Organizer</span>'
+          : orgSt === 'pending'
+            ? '<span class="badge badge-amber" style="font-size:10px;margin-top:3px">⏳ Pending</span>'
+            : '';
+
+        const reportsBadge = rCount > 0
+          ? `<span class="badge badge-red" style="cursor:default">${rCount}</span>`
+          : '<span style="color:var(--muted);font-size:12px">—</span>';
 
         const statusBadge = isBanned
           ? '<span class="badge badge-red">🚫 Banned</span>'
@@ -143,24 +185,30 @@
             <td>
               <div class="user-cell">
                 ${photo
-                  ? `<div class="avatar" style="cursor:zoom-in" onclick="openLightbox('${escHtml(photo)}')"><img src="${escHtml(photo)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>`
+                  ? `<div class="avatar" style="cursor:zoom-in" onclick="openLightbox(this.querySelector('img').src)"><img src="${escHtml(photo)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>`
                   : `<div class="avatar" style="background:${bg}30;color:${bg};font-size:13px">${avatarInitial(name)}</div>`
                 }
                 <div>
-                  <div class="user-name">${name}</div>
-                  <div class="user-sub">${handle}</div>
+                  <div class="user-name">${escHtml(name)}</div>
+                  <div class="user-sub">${escHtml(handle)}</div>
                 </div>
               </div>
             </td>
-            <td style="color:var(--muted);font-size:12px">${email}</td>
+            <td style="color:var(--muted);font-size:12px">${escHtml(email)}</td>
             <td style="color:var(--muted);font-size:12px;white-space:nowrap">${joined}</td>
-            <td>${orgBadge}</td>
+            <td>
+              <div style="display:flex;flex-direction:column;align-items:flex-start;gap:3px">
+                ${tierBadge}
+                ${orgLine}
+              </div>
+            </td>
             <td>
               <div style="display:flex;gap:6px;align-items:center">
                 <span style="color:var(--yellow);font-weight:700">${paid}</span>
                 <button class="btn btn-ghost btn-xs" onclick="openCreditsModal('${id}')">Edit</button>
               </div>
             </td>
+            <td>${reportsBadge}</td>
             <td>${statusBadge}</td>
             <td>
               <div class="btn-row">
@@ -243,19 +291,44 @@
 
     function filterUsers() {
       const q = document.getElementById('search').value.toLowerCase();
-      if (!q) return allUsers;
-      return allUsers.filter(u => {
+      let list = allUsers;
+
+      if (tierFilter !== 'all') {
+        list = list.filter(u => {
+          const tier  = u.subscription_tier || u.subscriptionTier || 'free';
+          const orgSt = u.organizer_status  || u.organizerStatus  || 'none';
+          if (tierFilter === 'organizer_plus') return tier === 'organizer_plus';
+          if (tierFilter === 'collector_plus') return tier === 'collector_plus';
+          if (tierFilter === 'organizer')      return orgSt === 'verified';
+          if (tierFilter === 'free')           return tier === 'free' || !tier;
+          return true;
+        });
+      }
+
+      if (q) list = list.filter(u => {
         const name   = (u.display_name || u.displayName || '').toLowerCase();
         const handle = (u.handle || '').toLowerCase();
         const email  = (u.email || '').toLowerCase();
         return name.includes(q) || handle.includes(q) || email.includes(q);
       });
+
+      return list;
     }
 
     function gotoPage(n)    { currentPage = n; renderTable(filterUsers()); }
     function setPageSize(n) { pageSize = parseInt(n); currentPage = 1; renderTable(filterUsers()); }
 
     document.getElementById('search').addEventListener('input', () => { currentPage = 1; renderTable(filterUsers()); });
+
+    document.getElementById('tier-tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-tier]');
+      if (!btn) return;
+      tierFilter = btn.dataset.tier;
+      currentPage = 1;
+      document.querySelectorAll('#tier-tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      renderTable(filterUsers());
+    });
 
     document.getElementById('credits-modal').addEventListener('click', e => {
       if (e.target === e.currentTarget) closeCreditsModal();
