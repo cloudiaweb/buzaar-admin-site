@@ -33,7 +33,7 @@
     (async () => {
       const admin = await requireAdmin();
       if (!admin) return;
-      renderNav('organizers');
+      await renderNavWithBadges('organizers');
       await loadData();
     })();
 

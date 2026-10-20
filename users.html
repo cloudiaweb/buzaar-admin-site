@@ -79,7 +79,7 @@
     (async () => {
       const admin = await requireAdmin();
       if (!admin) return;
-      renderNav('users');
+      await renderNavWithBadges('users');
       await loadUsers();
     })();
 

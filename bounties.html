@@ -69,7 +69,7 @@
     (async () => {
       const admin = await requireAdmin();
       if (!admin) return;
-      renderNav('bounties');
+      await renderNavWithBadges('bounties');
       await loadBounties();
     })();
 

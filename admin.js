@@ -31,6 +31,24 @@ async function requireAdmin() {
   return { user, profile };
 }
 
+async function renderNavWithBadges(active) {
+  const db = getDb();
+  const [
+    { count: pendingOrg },
+    { count: openReports },
+    { count: unresolvedAlerts },
+  ] = await Promise.all([
+    db.from('profiles').select('*', { count: 'exact', head: true }).eq('organizer_status', 'pending'),
+    db.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+    db.from('monitoring_alerts').select('*', { count: 'exact', head: true }).eq('resolved', false),
+  ]);
+  renderNav(active, {
+    organizers: pendingOrg   || undefined,
+    reports:    openReports  || undefined,
+    monitoring: unresolvedAlerts || undefined,
+  });
+}
+
 function renderNav(active, badges = {}) {
   const pages = [
     { href: './dashboard.html',     label: 'Dashboard',   key: 'dashboard' },

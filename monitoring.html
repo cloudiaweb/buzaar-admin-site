@@ -89,7 +89,7 @@
     (async () => {
       const admin = await requireAdmin();
       if (!admin) return;
-      renderNav('monitoring');
+      await renderNavWithBadges('monitoring');
       await loadData();
     })();
 

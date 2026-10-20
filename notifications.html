@@ -72,7 +72,7 @@
     (async () => {
       const admin = await requireAdmin();
       if (!admin) return;
-      renderNav('notifications');
+      await renderNavWithBadges('notifications');
     })();
 
     function updatePreview() {
