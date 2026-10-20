@@ -18,6 +18,7 @@
       <input type="text" id="search" placeholder="Search by name, handle, or email…">
     </div>
 
+    <div id="pagination"></div>
     <div class="table-wrap">
       <div class="table-overflow">
         <table>
@@ -75,6 +76,7 @@
     let allUsers = [];
     let creditTarget = null;
     const creditUserMap = {};
+    let currentPage = 1, pageSize = 10;
 
     (async () => {
       const admin = await requireAdmin();
@@ -104,10 +106,15 @@
       const tbody = document.getElementById('users-body');
       if (users.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><h3>No users found</h3></div></td></tr>';
+        renderPagination('pagination', 1, 1, 0, pageSize, 'gotoPage', 'setPageSize');
         return;
       }
 
-      tbody.innerHTML = users.map(u => {
+      const pg = paginateList(users, currentPage, pageSize);
+      currentPage = pg.page;
+      renderPagination('pagination', pg.page, pg.totalPages, pg.total, pageSize, 'gotoPage', 'setPageSize');
+
+      tbody.innerHTML = pg.items.map(u => {
         const id      = u.id;
         const name    = u.display_name || u.displayName || '(no name)';
         creditUserMap[id] = { id, name, paid: u.paid_credits ?? u.paidCredits ?? 0 };
@@ -245,7 +252,10 @@
       });
     }
 
-    document.getElementById('search').addEventListener('input', () => renderTable(filterUsers()));
+    function gotoPage(n)    { currentPage = n; renderTable(filterUsers()); }
+    function setPageSize(n) { pageSize = parseInt(n); currentPage = 1; renderTable(filterUsers()); }
+
+    document.getElementById('search').addEventListener('input', () => { currentPage = 1; renderTable(filterUsers()); });
 
     document.getElementById('credits-modal').addEventListener('click', e => {
       if (e.target === e.currentTarget) closeCreditsModal();

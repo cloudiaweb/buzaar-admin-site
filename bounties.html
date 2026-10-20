@@ -24,6 +24,7 @@
       <input type="text" id="search" placeholder="Search by item name or poster…">
     </div>
 
+    <div id="pagination"></div>
     <div id="bounty-grid" class="chase-grid">
       <div class="loading"><div class="spinner"></div></div>
     </div>
@@ -47,6 +48,7 @@
     const db = getDb();
     let allBounties = [], activeTab = 'active', removeTarget = null;
     const bountyNameMap = {};
+    let currentPage = 1, pageSize = 10;
 
     (async () => {
       const admin = await requireAdmin();
@@ -97,10 +99,15 @@
 
       if (list.length === 0) {
         grid.innerHTML = '<div class="empty-state"><h3>No chases found</h3></div>';
+        renderPagination('pagination', 1, 1, 0, pageSize, 'gotoPage', 'setPageSize');
         return;
       }
 
-      grid.innerHTML = list.map(b => {
+      const pg = paginateList(list, currentPage, pageSize);
+      currentPage = pg.page;
+      renderPagination('pagination', pg.page, pg.totalPages, pg.total, pageSize, 'gotoPage', 'setPageSize');
+
+      grid.innerHTML = pg.items.map(b => {
         bountyNameMap[b.id] = b.item || '';
 
         const statusBadge = b.found
@@ -186,16 +193,20 @@
       btn.disabled = false;
     }
 
+    function gotoPage(n)    { currentPage = n; renderTable(); }
+    function setPageSize(n) { pageSize = parseInt(n); currentPage = 1; renderTable(); }
+
     document.getElementById('tabs').addEventListener('click', e => {
       const btn = e.target.closest('[data-tab]');
       if (!btn) return;
       activeTab = btn.dataset.tab;
+      currentPage = 1;
       document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
       renderTable();
     });
 
-    document.getElementById('search').addEventListener('input', renderTable);
+    document.getElementById('search').addEventListener('input', () => { currentPage = 1; renderTable(); });
 
     document.getElementById('confirm-modal').addEventListener('click', e => {
       if (e.target === e.currentTarget) closeModal();

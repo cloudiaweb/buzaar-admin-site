@@ -130,6 +130,51 @@ function avatarBg(str) {
   return palette[Math.abs(h) % palette.length];
 }
 
+function paginateList(list, page, size) {
+  const totalPages = Math.max(1, Math.ceil(list.length / size));
+  const safePage   = Math.min(Math.max(1, page), totalPages);
+  return {
+    items: list.slice((safePage - 1) * size, safePage * size),
+    page:  safePage,
+    totalPages,
+    total: list.length,
+  };
+}
+
+function renderPagination(containerId, page, totalPages, total, pageSize, gotoFn, sizeFn) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (total === 0) { el.innerHTML = ''; return; }
+
+  const from  = (page - 1) * pageSize + 1;
+  const to    = Math.min(page * pageSize, total);
+  const start = Math.max(1, Math.min(page - 2, totalPages - 4));
+  const end   = Math.min(totalPages, start + 4);
+
+  let nums = '';
+  for (let i = start; i <= end; i++) {
+    nums += `<button class="page-btn${i === page ? ' active' : ''}" onclick="${gotoFn}(${i})">${i}</button>`;
+  }
+
+  el.innerHTML = `
+    <div class="pagination-wrap">
+      <span class="pagination-info">${from}–${to} of ${total}</span>
+      <div class="pagination">
+        <button class="page-btn" ${page <= 1 ? 'disabled' : ''} onclick="${gotoFn}(1)">«</button>
+        <button class="page-btn" ${page <= 1 ? 'disabled' : ''} onclick="${gotoFn}(${page - 1})">‹</button>
+        ${nums}
+        <button class="page-btn" ${page >= totalPages ? 'disabled' : ''} onclick="${gotoFn}(${page + 1})">›</button>
+        <button class="page-btn" ${page >= totalPages ? 'disabled' : ''} onclick="${gotoFn}(${totalPages})">»</button>
+      </div>
+      <select class="page-size-select" onchange="${sizeFn}(this.value)">
+        <option value="10" ${pageSize === 10 ? 'selected' : ''}>10 / page</option>
+        <option value="20" ${pageSize === 20 ? 'selected' : ''}>20 / page</option>
+        <option value="50" ${pageSize === 50 ? 'selected' : ''}>50 / page</option>
+      </select>
+    </div>
+  `;
+}
+
 function drawBarChart(canvas, values, labels, hexColor) {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;

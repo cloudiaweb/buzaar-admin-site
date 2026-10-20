@@ -22,6 +22,7 @@
     <div id="list-area">
       <div class="loading"><div class="spinner"></div>Loading…</div>
     </div>
+    <div id="pagination"></div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -29,6 +30,7 @@
   <script>
     const db = getDb();
     let users = [], appMap = {}, activeTab = 'pending', updating = null;
+    let currentPage = 1, pageSize = 10;
 
     (async () => {
       const admin = await requireAdmin();
@@ -81,11 +83,18 @@
           activeTab === 'pending' ? 'All clear' : 'No organizers yet',
           activeTab === 'pending' ? 'No pending applications right now.' : ''
         );
+        renderPagination('pagination', 1, 1, 0, pageSize, 'gotoPage', 'setPageSize');
         return;
       }
 
-      area.innerHTML = filtered.map(u => renderCard(u)).join('');
+      const pg = paginateList(filtered, currentPage, pageSize);
+      currentPage = pg.page;
+      renderPagination('pagination', pg.page, pg.totalPages, pg.total, pageSize, 'gotoPage', 'setPageSize');
+      area.innerHTML = pg.items.map(u => renderCard(u)).join('');
     }
+
+    function gotoPage(n)    { currentPage = n; renderList(); }
+    function setPageSize(n) { pageSize = parseInt(n); currentPage = 1; renderList(); }
 
     function statusBadge(status) {
       const map = {
@@ -194,6 +203,7 @@
       const btn = e.target.closest('[data-tab]');
       if (!btn) return;
       activeTab = btn.dataset.tab;
+      currentPage = 1;
       document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
       renderList();

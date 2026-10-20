@@ -22,6 +22,7 @@
     <div id="list-area">
       <div class="loading"><div class="spinner"></div>Loading…</div>
     </div>
+    <div id="pagination"></div>
   </main>
 
   <!-- Resolve modal -->
@@ -48,6 +49,7 @@
     let reports = [], activeTab = 'pending', resolveTarget = null;
     let adminId = null;
     const mediaMap = {};
+    let currentPage = 1, pageSize = 10;
 
     (async () => {
       const admin = await requireAdmin();
@@ -124,10 +126,15 @@
           activeTab === 'pending' ? 'No pending reports' : 'Nothing here',
           activeTab === 'pending' ? 'All reports have been reviewed.' : ''
         );
+        renderPagination('pagination', 1, 1, 0, pageSize, 'gotoPage', 'setPageSize');
         return;
       }
 
-      area.innerHTML = list.map(r => {
+      const pg = paginateList(list, currentPage, pageSize);
+      currentPage = pg.page;
+      renderPagination('pagination', pg.page, pg.totalPages, pg.total, pageSize, 'gotoPage', 'setPageSize');
+
+      area.innerHTML = pg.items.map(r => {
         const reporter = r.reporter
           ? `${r.reporter.display_name || '?'}${r.reporter.handle ? ' @' + r.reporter.handle : ''}`
           : 'Unknown';
@@ -234,10 +241,14 @@
       document.getElementById('pending-badge').textContent = pending > 0 ? `(${pending})` : '';
     }
 
+    function gotoPage(n)    { currentPage = n; renderList(); }
+    function setPageSize(n) { pageSize = parseInt(n); currentPage = 1; renderList(); }
+
     document.getElementById('tabs').addEventListener('click', e => {
       const btn = e.target.closest('[data-tab]');
       if (!btn) return;
       activeTab = btn.dataset.tab;
+      currentPage = 1;
       document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
       renderList();

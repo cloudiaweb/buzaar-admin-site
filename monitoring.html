@@ -47,6 +47,7 @@
 
     <!-- Alerts panel -->
     <div id="panel-alerts">
+      <div id="alert-pagination"></div>
       <div class="table-wrap" id="alerts-wrap">
         <div class="loading"><div class="spinner"></div></div>
       </div>
@@ -62,6 +63,7 @@
           <button class="tab" data-reason="expiry">Expiry</button>
         </div>
       </div>
+      <div id="audit-pagination"></div>
       <div class="table-wrap" id="audit-wrap">
         <div class="loading"><div class="spinner"></div></div>
       </div>
@@ -75,6 +77,8 @@
     let allAlerts = [];
     let allAudit  = [];
     let auditFilter = 'all';
+    let alertPage = 1, alertPageSize = 10;
+    let auditPage = 1, auditPageSize = 10;
 
     const REASON_COLORS = {
       purchase:       'teal',
@@ -142,15 +146,25 @@
     }
 
     // ── Alerts ────────────────────────────────────────────────────────────────
+    function gotoAlertPage(n)    { alertPage = n; renderAlerts(); }
+    function setAlertPageSize(n) { alertPageSize = parseInt(n); alertPage = 1; renderAlerts(); }
+    function gotoAuditPage(n)    { auditPage = n; renderAudit(); }
+    function setAuditPageSize(n) { auditPageSize = parseInt(n); auditPage = 1; renderAudit(); }
+
     function renderAlerts() {
       const wrap = document.getElementById('alerts-wrap');
 
       if (!allAlerts.length) {
         wrap.innerHTML = `<div class="empty-state"><h3>No alerts</h3><p>The system is running cleanly.</p></div>`;
+        renderPagination('alert-pagination', 1, 1, 0, alertPageSize, 'gotoAlertPage', 'setAlertPageSize');
         return;
       }
 
-      const rows = allAlerts.map(a => `
+      const pg   = paginateList(allAlerts, alertPage, alertPageSize);
+      alertPage  = pg.page;
+      renderPagination('alert-pagination', pg.page, pg.totalPages, pg.total, alertPageSize, 'gotoAlertPage', 'setAlertPageSize');
+
+      const rows = pg.items.map(a => `
         <div class="alert-row ${a.resolved ? 'resolved' : ''}" id="alert-${a.id}">
           <div class="alert-dot" style="background:${a.resolved ? 'var(--muted)' : 'var(--red)'}"></div>
           <div class="alert-body">
@@ -194,16 +208,21 @@
     // ── Audit ─────────────────────────────────────────────────────────────────
     function renderAudit() {
       const wrap = document.getElementById('audit-wrap');
-      const rows = auditFilter === 'all'
+      const filtered = auditFilter === 'all'
         ? allAudit
         : allAudit.filter(r => r.reason === auditFilter);
 
-      if (!rows.length) {
+      if (!filtered.length) {
         wrap.innerHTML = `<div class="empty-state"><h3>No entries</h3><p>No subscription changes match this filter.</p></div>`;
+        renderPagination('audit-pagination', 1, 1, 0, auditPageSize, 'gotoAuditPage', 'setAuditPageSize');
         return;
       }
 
-      const trs = rows.map(r => {
+      const pg  = paginateList(filtered, auditPage, auditPageSize);
+      auditPage = pg.page;
+      renderPagination('audit-pagination', pg.page, pg.totalPages, pg.total, auditPageSize, 'gotoAuditPage', 'setAuditPageSize');
+
+      const trs = pg.items.map(r => {
         const user = r.profiles;
         const name = user?.display_name || 'Unknown';
         const handle = user?.handle ? `@${user.handle}` : '';
@@ -288,6 +307,7 @@
       document.querySelectorAll('#reason-tabs .tab').forEach(t => t.classList.remove('active'));
       btn.classList.add('active');
       auditFilter = btn.dataset.reason;
+      auditPage = 1;
       renderAudit();
     });
 
