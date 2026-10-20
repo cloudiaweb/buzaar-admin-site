@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chases — Buzaar Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body>
+  <nav id="nav"></nav>
+
+  <main id="content">
+    <div class="page-title">Chases</div>
+    <div class="page-subtitle" id="bounty-count">Loading…</div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="active">Active</button>
+      <button class="tab" data-tab="found">Found</button>
+      <button class="tab" data-tab="all">All</button>
+    </div>
+
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="search" placeholder="Search by item name or poster…">
+    </div>
+
+    <div class="table-wrap">
+      <div class="table-overflow">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Poster</th>
+              <th>Event</th>
+              <th>Price</th>
+              <th>Condition</th>
+              <th>Posted</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="bounty-body">
+            <tr><td colspan="8"><div class="loading"><div class="spinner"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Confirm deactivate modal -->
+  <div class="modal-overlay" id="confirm-modal">
+    <div class="modal">
+      <div class="modal-title">Remove Bounty?</div>
+      <div class="modal-sub" id="confirm-item">This will deactivate the bounty and hide it from the app.</div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-red" id="confirm-btn" onclick="confirmRemove()">Remove</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="./admin.js"></script>
+  <script>
+    const db = getDb();
+    let allBounties = [], activeTab = 'active', removeTarget = null;
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+      renderNav('bounties');
+      await loadBounties();
+    })();
+
+    async function loadBounties() {
+      const { data, error } = await db
+        .from('bounties')
+        .select(`
+          id, item, category, price, condition, is_active, found, created_at, poster_id, event_name, bounty_type,
+          poster:profiles!poster_id(id, display_name, handle)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(500);
+
+      if (error) {
+        document.getElementById('bounty-count').textContent = 'Error loading chases: ' + error.message;
+        return;
+      }
+
+      allBounties = data || [];
+      document.getElementById('bounty-count').textContent = `${allBounties.length} chases total`;
+      renderTable();
+    }
+
+    function getFiltered() {
+      const q    = document.getElementById('search').value.toLowerCase();
+      let list   = allBounties;
+
+      if (activeTab === 'active') list = list.filter(b => b.is_active && !b.found);
+      else if (activeTab === 'found') list = list.filter(b => b.found);
+
+      if (q) list = list.filter(b => {
+        const item   = (b.item || '').toLowerCase();
+        const poster = (b.poster?.display_name || '').toLowerCase();
+        return item.includes(q) || poster.includes(q);
+      });
+
+      return list;
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('bounty-body');
+      const list  = getFiltered();
+
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><h3>No bounties found</h3></div></td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = list.map(b => {
+        const status = b.found
+          ? '<span class="badge badge-teal">Found</span>'
+          : b.is_active
+            ? '<span class="badge badge-green">Active</span>'
+            : '<span class="badge badge-muted">Inactive</span>';
+
+        const price  = b.price ? `₱${Number(b.price).toLocaleString()}` : '—';
+        const poster = b.poster
+          ? `<div class="user-name">${b.poster.display_name || '?'}</div><div class="user-sub">${b.poster.handle ? '@' + b.poster.handle : ''}</div>`
+          : '—';
+
+        return `
+          <tr>
+            <td>
+              <strong style="font-size:13px">${b.item || '—'}</strong>
+              ${b.category ? `<div style="color:var(--muted);font-size:11px">${b.category}</div>` : ''}
+            </td>
+            <td><div class="user-cell">${poster}</div></td>
+            <td style="color:var(--muted);font-size:12px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.event_name || '—'}</td>
+            <td style="color:var(--yellow);font-weight:700">${price}</td>
+            <td style="color:var(--muted);font-size:12px">${b.condition || '—'}</td>
+            <td style="color:var(--muted);font-size:12px;white-space:nowrap">${formatDate(b.created_at)}</td>
+            <td>${status}</td>
+            <td>
+              ${b.is_active && !b.found
+                ? `<button class="btn btn-red btn-xs" onclick="openRemove('${b.id}','${(b.item || '').replace(/'/g,"\\'")}')">Remove</button>`
+                : '<span style="color:var(--muted);font-size:12px">—</span>'
+              }
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openRemove(id, name) {
+      removeTarget = id;
+      document.getElementById('confirm-item').textContent = `Remove "${name}"? This will deactivate it and hide it from all users.`;
+      document.getElementById('confirm-modal').classList.add('open');
+    }
+
+    function closeModal() {
+      document.getElementById('confirm-modal').classList.remove('open');
+      removeTarget = null;
+    }
+
+    async function confirmRemove() {
+      if (!removeTarget) return;
+      const btn = document.getElementById('confirm-btn');
+      btn.disabled = true;
+
+      await db.from('bounties').update({ is_active: false }).eq('id', removeTarget);
+      allBounties = allBounties.map(b => b.id === removeTarget ? { ...b, is_active: false } : b);
+
+      closeModal();
+      renderTable();
+      showToast('Bounty removed');
+      btn.disabled = false;
+    }
+
+    document.getElementById('tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-tab]');
+      if (!btn) return;
+      activeTab = btn.dataset.tab;
+      document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      renderTable();
+    });
+
+    document.getElementById('search').addEventListener('input', renderTable);
+
+    document.getElementById('confirm-modal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeModal();
+    });
+  </script>
+</body>
+</html>

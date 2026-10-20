@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Users — Buzaar Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body>
+  <nav id="nav"></nav>
+
+  <main id="content">
+    <div class="page-title">Users</div>
+    <div class="page-subtitle" id="user-count">Loading…</div>
+
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="search" placeholder="Search by name, handle, or email…">
+    </div>
+
+    <div class="table-wrap">
+      <div class="table-overflow">
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Email</th>
+              <th>Joined</th>
+              <th>Organizer</th>
+              <th>Credits</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="users-body">
+            <tr><td colspan="7"><div class="loading"><div class="spinner"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Credits modal -->
+  <div class="modal-overlay" id="credits-modal">
+    <div class="modal">
+      <div class="modal-title">Edit Credits</div>
+      <div class="modal-sub" id="credits-modal-name">—</div>
+      <div style="display:flex;gap:12px;margin-bottom:12px">
+        <div style="flex:1;background:var(--surface2);border-radius:10px;padding:12px;text-align:center">
+          <div style="color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px">Paid Credits</div>
+          <div id="current-paid" style="font-size:24px;font-weight:800;color:var(--yellow)">—</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="credit-type">Credit type</label>
+        <select id="credit-type">
+          <option value="paid_credits">Paid Credits</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="credit-amount">Amount (use negative to deduct)</label>
+        <input type="number" id="credit-amount" placeholder="e.g. 5 or -2">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeCreditsModal()">Cancel</button>
+        <button class="btn btn-yellow" id="credits-save-btn" onclick="saveCredits()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="./admin.js"></script>
+  <script>
+    const db = getDb();
+    let allUsers = [];
+    let creditTarget = null;
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+      renderNav('users');
+      await loadUsers();
+    })();
+
+    async function loadUsers() {
+      const { data, error } = await db.functions.invoke('list-users').catch(() => ({ data: null }));
+
+      let raw = data;
+      if (!raw) {
+        const res = await db.from('profiles')
+          .select('id, display_name, handle, email, organizer_status, is_admin, is_banned, paid_credits, avatar_color, created_at')
+          .eq('is_admin', false)
+          .order('created_at', { ascending: false });
+        raw = res.data || [];
+      }
+
+      allUsers = (Array.isArray(raw) ? raw : (raw?.users || [])).filter(u => !u.is_admin && !u.isAdmin);
+      document.getElementById('user-count').textContent = `${allUsers.length} users total`;
+      renderTable(allUsers);
+    }
+
+    function renderTable(users) {
+      const tbody = document.getElementById('users-body');
+      if (users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><h3>No users found</h3></td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = users.map(u => {
+        const id      = u.id;
+        const name    = u.display_name || u.displayName || '(no name)';
+        const handle  = u.handle ? `@${u.handle}` : '';
+        const email   = u.email || '—';
+        const joined  = formatDate(u.created_at || u.createdAt);
+        const isBanned= u.is_banned || u.isBanned;
+        const orgSt   = u.organizer_status || u.organizerStatus || 'none';
+        const paid    = u.paid_credits   ?? u.paidCredits   ?? 0;
+        const bg      = avatarBg(name);
+
+        const orgBadge = {
+          verified: '<span class="badge badge-teal">✓ Organizer</span>',
+          pending:  '<span class="badge badge-amber">⏳ Pending</span>',
+          rejected: '<span class="badge badge-red">✗ Rejected</span>',
+          none:     '<span class="badge badge-muted">None</span>',
+        }[orgSt] || '<span class="badge badge-muted">None</span>';
+
+        const statusBadge = isBanned
+          ? '<span class="badge badge-red">🚫 Banned</span>'
+          : '<span class="badge badge-teal">✓ Active</span>';
+
+        return `
+          <tr>
+            <td>
+              <div class="user-cell">
+                <div class="avatar" style="background:${bg}30;color:${bg};font-size:13px">${avatarInitial(name)}</div>
+                <div>
+                  <div class="user-name">${name}</div>
+                  <div class="user-sub">${handle}</div>
+                </div>
+              </div>
+            </td>
+            <td style="color:var(--muted);font-size:12px">${email}</td>
+            <td style="color:var(--muted);font-size:12px;white-space:nowrap">${joined}</td>
+            <td>${orgBadge}</td>
+            <td>
+              <div style="display:flex;gap:6px;align-items:center">
+                <span style="color:var(--yellow);font-weight:700">${paid}</span>
+                <button class="btn btn-ghost btn-xs" onclick='openCreditsModal(${JSON.stringify({ id, name, paid })})'>Edit</button>
+              </div>
+            </td>
+            <td>${statusBadge}</td>
+            <td>
+              <div class="btn-row">
+                ${isBanned
+                  ? `<button class="btn btn-teal btn-xs" onclick="toggleBan('${id}', false)">Unban</button>`
+                  : `<button class="btn btn-red  btn-xs" onclick="toggleBan('${id}', true)">Ban</button>`
+                }
+                ${orgSt === 'verified' ? `<button class="btn btn-amber btn-xs" onclick="stripOrganizer('${id}')">Strip Org</button>` : ''}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function toggleBan(userId, ban) {
+      await db.from('profiles').update({ is_banned: ban }).eq('id', userId);
+      allUsers = allUsers.map(u => u.id === userId ? { ...u, is_banned: ban, isBanned: ban } : u);
+      renderTable(filterUsers());
+      showToast(ban ? 'User banned' : 'User unbanned', ban ? 'error' : 'success');
+    }
+
+    async function stripOrganizer(userId) {
+      if (!confirm('Revoke organizer status from this user?')) return;
+      await db.from('profiles').update({ organizer_status: 'none', organizer_verified_at: null }).eq('id', userId);
+      await db.from('notifications').insert({
+        user_id: userId, type: 'organizer_revoked', read: false,
+        data: { title: 'Organizer status removed', body: 'Your organizer verification has been revoked by an admin.' },
+      });
+      allUsers = allUsers.map(u => u.id === userId ? { ...u, organizer_status: 'none', organizerStatus: 'none' } : u);
+      renderTable(filterUsers());
+      showToast('Organizer status revoked');
+    }
+
+    function openCreditsModal(user) {
+      creditTarget = user;
+      document.getElementById('credits-modal-name').textContent = user.name;
+      document.getElementById('current-paid').textContent  = user.paid;
+      document.getElementById('credit-amount').value = '';
+      document.getElementById('credits-modal').classList.add('open');
+    }
+
+    function closeCreditsModal() {
+      document.getElementById('credits-modal').classList.remove('open');
+      creditTarget = null;
+    }
+
+    async function saveCredits() {
+      if (!creditTarget) return;
+      const type   = document.getElementById('credit-type').value;
+      const amount = parseInt(document.getElementById('credit-amount').value, 10);
+      if (isNaN(amount)) { showToast('Enter a valid number', 'error'); return; }
+
+      const btn = document.getElementById('credits-save-btn');
+      btn.disabled = true;
+
+      const current = creditTarget.paid;
+      const newVal  = Math.max(0, current + amount);
+
+      await db.from('profiles').update({ paid_credits: newVal }).eq('id', creditTarget.id);
+
+      allUsers = allUsers.map(u => {
+        if (u.id !== creditTarget.id) return u;
+        return { ...u, paid_credits: newVal, paidCredits: newVal };
+      });
+
+      renderTable(filterUsers());
+      closeCreditsModal();
+      showToast(`Credits updated to ${newVal}`);
+      btn.disabled = false;
+    }
+
+    function filterUsers() {
+      const q = document.getElementById('search').value.toLowerCase();
+      if (!q) return allUsers;
+      return allUsers.filter(u => {
+        const name   = (u.display_name || u.displayName || '').toLowerCase();
+        const handle = (u.handle || '').toLowerCase();
+        const email  = (u.email || '').toLowerCase();
+        return name.includes(q) || handle.includes(q) || email.includes(q);
+      });
+    }
+
+    document.getElementById('search').addEventListener('input', () => renderTable(filterUsers()));
+
+    document.getElementById('credits-modal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeCreditsModal();
+    });
+  </script>
+</body>
+</html>

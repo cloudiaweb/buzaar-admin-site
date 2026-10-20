@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reports — Buzaar Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body>
+  <nav id="nav"></nav>
+
+  <main id="content">
+    <div class="page-title">Reports</div>
+    <div class="page-subtitle" id="report-count">Loading…</div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="pending">Pending <span id="pending-badge"></span></button>
+      <button class="tab" data-tab="resolved">Resolved</button>
+      <button class="tab" data-tab="dismissed">Dismissed</button>
+    </div>
+
+    <div id="list-area">
+      <div class="loading"><div class="spinner"></div>Loading…</div>
+    </div>
+  </main>
+
+  <!-- Resolve modal -->
+  <div class="modal-overlay" id="resolve-modal">
+    <div class="modal">
+      <div class="modal-title" id="resolve-title">Resolve Report</div>
+      <div class="modal-sub" id="resolve-sub">Add an optional note about the action taken.</div>
+      <div class="form-group">
+        <label for="admin-note">Admin note (optional)</label>
+        <textarea id="admin-note" placeholder="e.g. Removed the bounty, user warned…"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeResolveModal()">Cancel</button>
+        <button class="btn btn-red btn-sm" onclick="resolveReport('dismissed')">Dismiss</button>
+        <button class="btn btn-teal" onclick="resolveReport('resolved')">✓ Resolve</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="./admin.js"></script>
+  <script>
+    const db = getDb();
+    let reports = [], activeTab = 'pending', resolveTarget = null;
+    let adminId = null;
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+      adminId = admin.profile.id;
+      renderNav('reports');
+      await loadReports();
+    })();
+
+    async function loadReports() {
+      showLoading(document.getElementById('list-area'));
+
+      const { data, error } = await db
+        .from('reports')
+        .select(`
+          id, reported_type, reported_id, reason, details, status, admin_note, created_at, resolved_at,
+          reporter:profiles!reported_by(id, display_name, handle),
+          resolver:profiles!resolved_by(id, display_name)
+        `)
+        .order('created_at', { ascending: false })
+        .limit(200);
+
+      if (error) {
+        document.getElementById('list-area').innerHTML =
+          '<div class="alert alert-red">Could not load reports. Make sure the reports table exists — see reports_migration.sql.</div>';
+        return;
+      }
+
+      reports = data || [];
+      const pending = reports.filter(r => r.status === 'pending').length;
+      document.getElementById('report-count').textContent = `${reports.length} reports total`;
+      document.getElementById('pending-badge').textContent = pending > 0 ? `(${pending})` : '';
+      renderNav('reports', { reports: pending || undefined });
+      renderList();
+    }
+
+    function getFiltered() {
+      return reports.filter(r => r.status === activeTab);
+    }
+
+    function typeLabel(type) {
+      const map = { bounty: '🎯 Bounty', profile: '👤 Profile', event: '📅 Event', offer: '💬 Offer' };
+      return map[type] || type;
+    }
+
+    function renderList() {
+      const area = document.getElementById('list-area');
+      const list = getFiltered();
+
+      if (list.length === 0) {
+        showEmpty(area,
+          activeTab === 'pending' ? 'No pending reports' : 'Nothing here',
+          activeTab === 'pending' ? 'All reports have been reviewed.' : ''
+        );
+        return;
+      }
+
+      area.innerHTML = list.map(r => {
+        const reporter = r.reporter
+          ? `${r.reporter.display_name || '?'}${r.reporter.handle ? ' @' + r.reporter.handle : ''}`
+          : 'Unknown';
+        const resolver = r.resolver ? `by ${r.resolver.display_name}` : '';
+
+        return `
+          <div class="card" id="report-${r.id}">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px">
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                  <span style="font-weight:700;font-size:14px">${typeLabel(r.reported_type)}</span>
+                  ${r.status === 'pending'
+                    ? '<span class="badge badge-amber">Pending</span>'
+                    : r.status === 'resolved'
+                      ? '<span class="badge badge-teal">Resolved</span>'
+                      : '<span class="badge badge-muted">Dismissed</span>'
+                  }
+                </div>
+                <div style="color:var(--muted);font-size:12px">
+                  Reported by <strong style="color:var(--text)">${reporter}</strong> · ${formatDateTime(r.created_at)}
+                </div>
+              </div>
+            </div>
+
+            <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+              <div style="font-weight:700;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Reason</div>
+              <div style="font-size:13px">${r.reason}</div>
+              ${r.details ? `<div style="color:var(--muted);font-size:12px;margin-top:6px">${r.details}</div>` : ''}
+            </div>
+
+            ${r.admin_note ? `
+              <div style="background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.2);border-radius:10px;padding:10px;margin-bottom:10px">
+                <div style="font-size:11px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Admin note ${resolver}</div>
+                <div style="font-size:13px;color:var(--text)">${r.admin_note}</div>
+              </div>` : ''}
+
+            ${r.status === 'pending' ? `
+              <div class="btn-row">
+                <button class="btn btn-teal btn-sm" onclick="openResolveModal('${r.id}','resolve')">✓ Resolve</button>
+                <button class="btn btn-ghost btn-sm" onclick="openResolveModal('${r.id}','dismiss')">Dismiss</button>
+              </div>` : `
+              <div style="color:var(--muted);font-size:12px">
+                ${r.status === 'resolved' ? '✓ Resolved' : '— Dismissed'} ${formatDate(r.resolved_at)} ${resolver}
+              </div>`
+            }
+          </div>
+        `;
+      }).join('');
+    }
+
+    function openResolveModal(reportId, action) {
+      resolveTarget = { id: reportId, action };
+      document.getElementById('resolve-title').textContent = action === 'resolve' ? 'Resolve Report' : 'Dismiss Report';
+      document.getElementById('admin-note').value = '';
+      document.getElementById('resolve-modal').classList.add('open');
+    }
+
+    function closeResolveModal() {
+      document.getElementById('resolve-modal').classList.remove('open');
+      resolveTarget = null;
+    }
+
+    async function resolveReport(status) {
+      if (!resolveTarget) return;
+      const note = document.getElementById('admin-note').value.trim();
+      const now  = new Date().toISOString();
+
+      const updateData = { status, admin_note: note || null, resolved_at: now };
+      if (adminId) updateData.resolved_by = adminId;
+
+      await db.from('reports').update(updateData).eq('id', resolveTarget.id);
+
+      reports = reports.map(r => r.id === resolveTarget.id
+        ? { ...r, status, admin_note: note || null, resolved_at: now }
+        : r
+      );
+
+      closeResolveModal();
+      renderList();
+      showToast(status === 'resolved' ? 'Report resolved ✓' : 'Report dismissed');
+
+      const pending = reports.filter(r => r.status === 'pending').length;
+      document.getElementById('pending-badge').textContent = pending > 0 ? `(${pending})` : '';
+    }
+
+    document.getElementById('tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-tab]');
+      if (!btn) return;
+      activeTab = btn.dataset.tab;
+      document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      renderList();
+    });
+
+    document.getElementById('resolve-modal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeResolveModal();
+    });
+  </script>
+</body>
+</html>

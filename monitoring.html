@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoring — Buzaar Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+  <style>
+    .alert-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex-shrink: 0; margin-top: 3px;
+    }
+    .alert-row {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .alert-row:last-child { border-bottom: none; }
+    .alert-row.resolved { opacity: 0.45; }
+    .alert-body { flex: 1; min-width: 0; }
+    .alert-source { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; color: var(--muted); text-transform: uppercase; margin-bottom: 3px; }
+    .alert-message { font-size: 13px; line-height: 1.5; margin-bottom: 6px; }
+    .alert-meta { font-size: 11px; color: var(--muted); }
+    .tier-change {
+      display: flex; align-items: center; gap: 6px;
+    }
+    .tier-label {
+      font-size: 12px; font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <nav id="nav"></nav>
+
+  <main id="content">
+    <div class="page-title">Monitoring</div>
+    <div class="page-subtitle">System alerts and subscription audit log</div>
+
+    <!-- Summary pills -->
+    <div id="summary-row" style="display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap"></div>
+
+    <!-- Tab switcher -->
+    <div class="tabs" id="main-tabs" style="margin-bottom:20px">
+      <button class="tab active" data-tab="alerts">Alerts</button>
+      <button class="tab" data-tab="audit">Subscription Audit</button>
+    </div>
+
+    <!-- Alerts panel -->
+    <div id="panel-alerts">
+      <div class="table-wrap" id="alerts-wrap">
+        <div class="loading"><div class="spinner"></div></div>
+      </div>
+    </div>
+
+    <!-- Audit panel -->
+    <div id="panel-audit" style="display:none">
+      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center">
+        <div class="tabs" id="reason-tabs" style="margin-bottom:0">
+          <button class="tab active" data-reason="all">All</button>
+          <button class="tab" data-reason="reconciliation">Reconciliation</button>
+          <button class="tab" data-reason="purchase">Purchase</button>
+          <button class="tab" data-reason="expiry">Expiry</button>
+        </div>
+      </div>
+      <div class="table-wrap" id="audit-wrap">
+        <div class="loading"><div class="spinner"></div></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="./admin.js"></script>
+  <script>
+    const db = getDb();
+    let allAlerts = [];
+    let allAudit  = [];
+    let auditFilter = 'all';
+
+    const REASON_COLORS = {
+      purchase:       'teal',
+      renewal:        'teal',
+      expiry:         'red',
+      refund:         'red',
+      cancellation:   'amber',
+      admin_override: 'primary',
+      reconciliation: null, // custom blue below
+    };
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+      renderNav('monitoring');
+      await loadData();
+    })();
+
+    async function loadData() {
+      const [{ data: alertRows, error: e1 }, { data: auditRows, error: e2 }] = await Promise.all([
+        db.from('monitoring_alerts')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(50),
+        db.from('subscription_audit')
+          .select('id, user_id, old_tier, new_tier, reason, product_id, changed_at, profiles(display_name, handle)')
+          .order('changed_at', { ascending: false })
+          .limit(150),
+      ]);
+
+      allAlerts = alertRows ?? [];
+      allAudit  = auditRows ?? [];
+
+      renderSummary();
+      renderAlerts();
+      renderAudit();
+    }
+
+    // ── Summary ──────────────────────────────────────────────────────────────
+    function renderSummary() {
+      const unresolved       = allAlerts.filter(a => !a.resolved).length;
+      const reconciled       = allAudit.filter(r => r.reason === 'reconciliation').length;
+      const today            = new Date().toDateString();
+      const todayChanges     = allAudit.filter(r => new Date(r.changed_at).toDateString() === today).length;
+
+      document.getElementById('summary-row').innerHTML = `
+        ${summaryPill('⚠️', unresolved + ' unresolved alert' + (unresolved !== 1 ? 's' : ''),
+            unresolved > 0 ? 'rgba(255,59,48,0.12)' : 'var(--surface)',
+            unresolved > 0 ? 'rgba(255,59,48,0.4)'  : 'var(--border)',
+            unresolved > 0 ? 'var(--red)' : 'var(--muted)')}
+        ${summaryPill('🔁', reconciled + ' reconciled',
+            reconciled > 0 ? 'rgba(96,165,250,0.1)' : 'var(--surface)',
+            reconciled > 0 ? 'rgba(96,165,250,0.35)' : 'var(--border)',
+            reconciled > 0 ? '#60a5fa' : 'var(--muted)')}
+        ${summaryPill('📋', todayChanges + ' audit entries today',
+            'var(--surface)', 'var(--border)', 'var(--muted)')}
+      `;
+    }
+
+    function summaryPill(icon, text, bg, border, color) {
+      return `<div style="display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:10px;
+        border:1px solid ${border};background:${bg};font-size:12px;font-weight:600;color:${color}">
+        ${icon} ${text}
+      </div>`;
+    }
+
+    // ── Alerts ────────────────────────────────────────────────────────────────
+    function renderAlerts() {
+      const wrap = document.getElementById('alerts-wrap');
+
+      if (!allAlerts.length) {
+        wrap.innerHTML = `<div class="empty-state"><h3>No alerts</h3><p>The system is running cleanly.</p></div>`;
+        return;
+      }
+
+      const rows = allAlerts.map(a => `
+        <div class="alert-row ${a.resolved ? 'resolved' : ''}" id="alert-${a.id}">
+          <div class="alert-dot" style="background:${a.resolved ? 'var(--muted)' : 'var(--red)'}"></div>
+          <div class="alert-body">
+            <div class="alert-source">${escHtml(a.source)}</div>
+            <div class="alert-message">${escHtml(a.message)}</div>
+            <div class="alert-meta">${timeAgo(a.created_at)}${a.resolved ? ' · Resolved' : ''}</div>
+          </div>
+          ${!a.resolved ? `
+            <button class="btn btn-ghost btn-xs" onclick="resolveAlert(${a.id}, this)">
+              Mark resolved
+            </button>
+          ` : `<span class="badge badge-muted" style="flex-shrink:0">Resolved</span>`}
+        </div>
+      `).join('');
+
+      wrap.innerHTML = `
+        <div class="table-header">
+          <div class="table-title">Alerts <span style="color:var(--muted);font-weight:400">(${allAlerts.length})</span></div>
+        </div>
+        ${rows}
+      `;
+    }
+
+    async function resolveAlert(id, btn) {
+      btn.disabled = true;
+      btn.textContent = '…';
+      const { error } = await db.from('monitoring_alerts').update({ resolved: true }).eq('id', id);
+      if (error) {
+        showToast('Failed to resolve alert', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Mark resolved';
+        return;
+      }
+      const idx = allAlerts.findIndex(a => a.id === id);
+      if (idx !== -1) allAlerts[idx].resolved = true;
+      renderSummary();
+      renderAlerts();
+      showToast('Alert resolved');
+    }
+
+    // ── Audit ─────────────────────────────────────────────────────────────────
+    function renderAudit() {
+      const wrap = document.getElementById('audit-wrap');
+      const rows = auditFilter === 'all'
+        ? allAudit
+        : allAudit.filter(r => r.reason === auditFilter);
+
+      if (!rows.length) {
+        wrap.innerHTML = `<div class="empty-state"><h3>No entries</h3><p>No subscription changes match this filter.</p></div>`;
+        return;
+      }
+
+      const trs = rows.map(r => {
+        const user = r.profiles;
+        const name = user?.display_name || 'Unknown';
+        const handle = user?.handle ? `@${user.handle}` : '';
+        const reasonBadge = reasonBadgeHtml(r.reason);
+        const oldTier = tierLabel(r.old_tier);
+        const newTier = tierLabel(r.new_tier);
+        return `
+          <tr>
+            <td>
+              <div class="user-cell">
+                <div class="avatar" style="background:var(--surface2);font-size:12px">
+                  ${(name[0] || '?').toUpperCase()}
+                </div>
+                <div>
+                  <div class="user-name">${escHtml(name)}</div>
+                  <div class="user-sub">${escHtml(handle)}</div>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="tier-change">
+                <span style="color:var(--muted);font-size:12px">${oldTier}</span>
+                <span style="color:var(--muted)">→</span>
+                <span style="font-weight:700;font-size:12px">${newTier}</span>
+              </div>
+            </td>
+            <td>${reasonBadge}</td>
+            <td style="color:var(--muted);font-size:12px;white-space:nowrap">${formatDateTime(r.changed_at)}</td>
+          </tr>
+        `;
+      }).join('');
+
+      wrap.innerHTML = `
+        <div class="table-header">
+          <div class="table-title">Subscription Changes <span style="color:var(--muted);font-weight:400">(${rows.length})</span></div>
+        </div>
+        <div class="table-overflow">
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Tier Change</th>
+                <th>Reason</th>
+                <th>When</th>
+              </tr>
+            </thead>
+            <tbody>${trs}</tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function tierLabel(tier) {
+      if (!tier || tier === 'free') return 'Free';
+      if (tier === 'collector_plus') return 'Collector+';
+      if (tier === 'organizer_plus') return 'Organizer+';
+      return tier;
+    }
+
+    function reasonBadgeHtml(reason) {
+      const cls = REASON_COLORS[reason];
+      if (reason === 'reconciliation') {
+        return `<span class="badge" style="color:#60a5fa;background:rgba(96,165,250,0.1);border-color:rgba(96,165,250,0.35)">${reason}</span>`;
+      }
+      if (cls) return `<span class="badge badge-${cls}">${reason}</span>`;
+      return `<span class="badge badge-muted">${reason}</span>`;
+    }
+
+    // ── Tab switching ─────────────────────────────────────────────────────────
+    document.getElementById('main-tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-tab]');
+      if (!btn) return;
+      document.querySelectorAll('#main-tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('panel-alerts').style.display = btn.dataset.tab === 'alerts' ? '' : 'none';
+      document.getElementById('panel-audit').style.display  = btn.dataset.tab === 'audit'  ? '' : 'none';
+    });
+
+    document.getElementById('reason-tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-reason]');
+      if (!btn) return;
+      document.querySelectorAll('#reason-tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      auditFilter = btn.dataset.reason;
+      renderAudit();
+    });
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function escHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function timeAgo(iso) {
+      const diff = Date.now() - new Date(iso).getTime();
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1)  return 'just now';
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24)  return `${hrs}h ago`;
+      return `${Math.floor(hrs / 24)}d ago`;
+    }
+  </script>
+</body>
+</html>

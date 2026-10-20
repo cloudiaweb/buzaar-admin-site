@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard — Buzaar Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body>
+  <nav id="nav"></nav>
+
+  <main id="content">
+    <div class="page-title">Dashboard</div>
+    <div class="page-subtitle">App health at a glance</div>
+
+    <div id="alerts-section"></div>
+
+    <div class="section-label" style="margin-top:0">Overview</div>
+    <div class="stat-grid" id="stat-grid">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+
+    <div class="section-label">Growth</div>
+    <div class="chart-card" id="chart-card">
+      <div class="chart-controls">
+        <div class="tabs" id="metric-tabs">
+          <button class="tab active" data-metric="users">Users</button>
+          <button class="tab" data-metric="bounties">Chases</button>
+          <button class="tab" data-metric="events">Events</button>
+        </div>
+        <div class="tabs" id="period-tabs">
+          <button class="tab" data-period="daily">7 Days</button>
+          <button class="tab active" data-period="weekly">6 Weeks</button>
+          <button class="tab" data-period="monthly">6 Months</button>
+        </div>
+      </div>
+      <div class="chart-summary">
+        <div class="chart-total" id="chart-total">—</div>
+        <div class="chart-total-label" id="chart-label">Loading…</div>
+      </div>
+      <canvas id="chart" style="width:100%;height:140px;display:block;"></canvas>
+    </div>
+
+    <div class="section-label">Churn Monitor</div>
+    <div id="churn-section">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="./admin.js"></script>
+  <script>
+    const db = getDb();
+    let allRows = null;
+    let metric  = 'users';
+    let period  = 'weekly';
+
+    const METRIC_COLORS = { users: '#6C63FF', bounties: '#5DCAA5', events: '#FF9F0A' };
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+      renderNav('dashboard');
+      await loadData();
+    })();
+
+    async function loadData() {
+      const since = new Date(); since.setFullYear(since.getFullYear() - 1);
+      const sinceISO  = since.toISOString();
+      const cut30     = new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const cut90     = new Date(Date.now() - 90 * 86_400_000).toISOString();
+
+      const [
+        { count: totalUsers },
+        { count: activeBounties },
+        { count: pendingOrg },
+        { count: openReports },
+        { count: verifiedOrg },
+        { count: unresolvedAlerts },
+        { data: userRows },
+        { data: bountyRows },
+        { data: eventRows },
+        { data: oldProfiles },
+        { data: bountyPosters },
+        { data: eventOrgs },
+      ] = await Promise.all([
+        db.from('profiles').select('*', { count: 'exact', head: true }).eq('is_admin', false),
+        db.from('bounties').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('found', false),
+        db.from('profiles').select('*', { count: 'exact', head: true }).eq('organizer_status', 'pending'),
+        db.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        db.from('profiles').select('*', { count: 'exact', head: true }).eq('organizer_status', 'verified'),
+        db.from('monitoring_alerts').select('*', { count: 'exact', head: true }).eq('resolved', false),
+        db.from('profiles').select('created_at').gte('created_at', sinceISO).eq('is_admin', false),
+        db.from('bounties').select('created_at').gte('created_at', sinceISO),
+        db.from('events').select('created_at').gte('created_at', sinceISO),
+        db.from('profiles').select('id, created_at').lt('created_at', cut30).eq('is_admin', false),
+        db.from('bounties').select('poster_id'),
+        db.from('events').select('organizer_id'),
+      ]);
+
+      allRows = { users: userRows || [], bounties: bountyRows || [], events: eventRows || [] };
+
+      // Stat grid
+      const statGrid = document.getElementById('stat-grid');
+      statGrid.innerHTML = `
+        ${statCard('👥', 'Total Users',           totalUsers,     '#6C63FF')}
+        ${statCard('🎯', 'Active Chases',           activeBounties, '#5DCAA5')}
+        ${statCard('🏷️', 'Verified Organizers',    verifiedOrg,    '#FFD60A')}
+        ${statCard('⏳', 'Pending Applications',   pendingOrg,     '#FF9F0A')}
+        ${statCard('🚩', 'Open Reports',           openReports,    '#FF3B30')}
+      `;
+
+      // Alerts
+      const alerts = document.getElementById('alerts-section');
+      const items = [];
+      if (pendingOrg  > 0) items.push(`<strong>${pendingOrg}</strong> organizer application${pendingOrg  > 1 ? 's' : ''} waiting`);
+      if (openReports > 0) items.push(`<strong>${openReports}</strong> report${openReports > 1 ? 's' : ''} to review`);
+      alerts.innerHTML = items.length
+        ? `<div class="alert alert-amber">⚠️ Action needed: ${items.join(' · ')}</div>`
+        : '';
+
+      // Badge counts for nav
+      renderNav('dashboard', {
+        organizers: pendingOrg        || undefined,
+        reports:    openReports       || undefined,
+        monitoring: unresolvedAlerts  || undefined,
+      });
+
+      // Churn
+      const activeIds = new Set([
+        ...(bountyPosters || []).map(r => r.poster_id),
+        ...(eventOrgs     || []).map(r => r.organizer_id),
+      ]);
+      const old       = oldProfiles || [];
+      const d30_90    = old.filter(p => p.created_at >= cut90 && !activeIds.has(p.id)).length;
+      const d90plus   = old.filter(p => p.created_at <  cut90 && !activeIds.has(p.id)).length;
+      const total     = d30_90 + d90plus;
+      const pct       = old.length > 0 ? Math.round((total / old.length) * 100) : 0;
+
+      document.getElementById('churn-section').innerHTML = `
+        <div class="card" style="border-color:rgba(255,59,48,0.25)">
+          <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+            <div style="font-size:28px">📉</div>
+            <div style="flex:1">
+              <div style="font-size:26px;font-weight:800;color:var(--text)">${total}</div>
+              <div style="color:var(--muted);font-size:12px">Dormant users (zero posts or events)</div>
+            </div>
+            <div style="text-align:center">
+              <div style="font-size:22px;font-weight:800;color:var(--red)">${pct}%</div>
+              <div style="color:var(--muted);font-size:11px">of older users</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <div style="flex:1;background:rgba(255,159,10,0.1);border:1px solid rgba(255,159,10,0.3);border-radius:10px;padding:10px;text-align:center">
+              <div style="font-size:20px;font-weight:800;color:var(--amber)">${d30_90}</div>
+              <div style="font-size:11px;color:var(--amber);font-weight:600">30–90 days</div>
+            </div>
+            <div style="flex:1;background:rgba(255,59,48,0.1);border:1px solid rgba(255,59,48,0.3);border-radius:10px;padding:10px;text-align:center">
+              <div style="font-size:20px;font-weight:800;color:var(--red)">${d90plus}</div>
+              <div style="font-size:11px;color:var(--red);font-weight:600">90+ days</div>
+            </div>
+          </div>
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);color:var(--muted);font-size:12px">
+            ${old.length} users registered 30+ days ago · ${old.length - total} engaged
+          </div>
+        </div>
+      `;
+
+      updateChart();
+    }
+
+    function statCard(icon, label, value, color) {
+      return `
+        <div class="stat-card" style="border-color:${color}30">
+          <div class="stat-icon" style="background:${color}18;font-size:20px">${icon}</div>
+          <div class="stat-value" style="color:${color}">${value ?? '—'}</div>
+          <div class="stat-label">${label}</div>
+        </div>
+      `;
+    }
+
+    function updateChart() {
+      if (!allRows) return;
+      const rows  = allRows[metric] || [];
+      const color = METRIC_COLORS[metric];
+      let values, labels;
+
+      if (period === 'daily')        { values = bucketByDay(rows, 7);   labels = dayLabels(7); }
+      else if (period === 'weekly')  { values = bucketByWeek(rows, 6);  labels = weekLabels(6); }
+      else                           { values = bucketByMonth(rows, 6); labels = monthLabels(6); }
+
+      const total  = values.reduce((a, b) => a + b, 0);
+      const mLabel = metric === 'users' ? 'New Users' : metric === 'bounties' ? 'New Chases' : 'New Events';
+      const pLabel = period === 'daily' ? 'last 7 days' : period === 'weekly' ? 'last 6 weeks' : 'last 6 months';
+
+      document.getElementById('chart-total').style.color = color;
+      document.getElementById('chart-total').textContent = total;
+      document.getElementById('chart-label').textContent = `${mLabel} · ${pLabel}`;
+
+      const canvas = document.getElementById('chart');
+      drawBarChart(canvas, values, labels, color);
+    }
+
+    // Tab handlers
+    document.getElementById('metric-tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-metric]');
+      if (!btn) return;
+      metric = btn.dataset.metric;
+      document.querySelectorAll('#metric-tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      updateChart();
+    });
+
+    document.getElementById('period-tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-period]');
+      if (!btn) return;
+      period = btn.dataset.period;
+      document.querySelectorAll('#period-tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      updateChart();
+    });
+
+    window.addEventListener('resize', updateChart);
+  </script>
+</body>
+</html>

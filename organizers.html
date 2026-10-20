@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Organizers — Buzaar Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body>
+  <nav id="nav"></nav>
+
+  <main id="content">
+    <div class="page-title">Organizers</div>
+    <div class="page-subtitle">Review applications and manage verified organizers</div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="pending">Pending <span id="pending-count"></span></button>
+      <button class="tab" data-tab="verified">Verified</button>
+      <button class="tab" data-tab="all">All</button>
+    </div>
+
+    <div id="list-area">
+      <div class="loading"><div class="spinner"></div>Loading…</div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="./admin.js"></script>
+  <script>
+    const db = getDb();
+    let users = [], appMap = {}, activeTab = 'pending', updating = null;
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+      renderNav('organizers');
+      await loadData();
+    })();
+
+    async function loadData() {
+      showLoading(document.getElementById('list-area'));
+
+      const [usersRes, appsRes] = await Promise.all([
+        db.functions.invoke('list-users').catch(() => ({ data: null })),
+        db.from('organizer_applications').select('user_id, org_name, contact_email, social_link, status'),
+      ]);
+
+      // Fallback: query profiles if edge function fails
+      let raw = usersRes.data;
+      if (!raw) {
+        const { data } = await db.from('profiles')
+          .select('id, display_name, handle, email, organizer_status, organizer_submitted_at, organizer_verified_at, avatar_color, is_admin, is_banned')
+          .eq('is_admin', false);
+        raw = data || [];
+      }
+
+      users = (Array.isArray(raw) ? raw : (raw?.users || [])).filter(u => !u.is_admin && !u.isAdmin);
+      appMap = {};
+      (appsRes.data || []).forEach(a => { appMap[a.user_id] = a; });
+
+      const pending = users.filter(u => (u.organizer_status || u.organizerStatus) === 'pending');
+      const countEl = document.getElementById('pending-count');
+      if (countEl) countEl.textContent = pending.length > 0 ? `(${pending.length})` : '';
+
+      renderNav('organizers', { organizers: pending.length || undefined });
+      renderList();
+    }
+
+    function orgStatus(u) { return u.organizer_status || u.organizerStatus || 'none'; }
+
+    function renderList() {
+      const area = document.getElementById('list-area');
+      const filtered = {
+        pending:  users.filter(u => orgStatus(u) === 'pending'),
+        verified: users.filter(u => orgStatus(u) === 'verified'),
+        all:      users,
+      }[activeTab] || [];
+
+      if (filtered.length === 0) {
+        showEmpty(area,
+          activeTab === 'pending' ? 'All clear' : 'No organizers yet',
+          activeTab === 'pending' ? 'No pending applications right now.' : ''
+        );
+        return;
+      }
+
+      area.innerHTML = filtered.map(u => renderCard(u)).join('');
+    }
+
+    function statusBadge(status) {
+      const map = {
+        verified: ['badge-teal', '✓ Verified'],
+        pending:  ['badge-amber', '⏳ Pending'],
+        rejected: ['badge-red', '✗ Rejected'],
+        none:     ['badge-muted', 'None'],
+      };
+      const [cls, label] = map[status] || map.none;
+      return `<span class="badge ${cls}">${label}</span>`;
+    }
+
+    function renderCard(u) {
+      const id     = u.id;
+      const name   = u.display_name || u.displayName || '(no name)';
+      const handle = u.handle ? `@${u.handle}` : '';
+      const email  = u.email || '—';
+      const status = orgStatus(u);
+      const app    = appMap[id];
+      const bg     = avatarBg(name);
+      const date   = u.organizer_submitted_at || u.organizerSubmittedAt
+        ? `Applied ${formatDate(u.organizer_submitted_at || u.organizerSubmittedAt)}`
+        : `Joined ${formatDate(u.created_at || u.createdAt)}`;
+
+      let actions = '';
+      if (status === 'pending') {
+        actions = `
+          <div class="btn-row" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+            <button class="btn btn-teal" onclick="setStatus('${id}','verified')">✓ Approve</button>
+            <button class="btn btn-red" onclick="setStatus('${id}','rejected')">✗ Reject</button>
+          </div>`;
+      } else if (status === 'verified') {
+        actions = `
+          <div class="btn-row" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+            <button class="btn btn-red" onclick="setStatus('${id}','none')">Revoke verification</button>
+          </div>`;
+      } else if (status === 'rejected') {
+        actions = `
+          <div class="btn-row" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+            <button class="btn btn-teal" onclick="setStatus('${id}','verified')">Approve anyway</button>
+          </div>`;
+      }
+
+      return `
+        <div class="card" id="card-${id}">
+          <div class="card-header" style="margin-bottom:0">
+            <div class="avatar" style="background:${bg}30;color:${bg}">${avatarInitial(name)}</div>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:14px">${name}</div>
+              <div style="color:var(--muted);font-size:12px">${handle || email}</div>
+              <div style="color:var(--muted);font-size:11px;margin-top:2px">${date}</div>
+            </div>
+            ${statusBadge(status)}
+          </div>
+          ${app ? `
+            <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+              <div style="font-weight:700;font-size:13px;margin-bottom:4px">${app.org_name || ''}</div>
+              ${app.contact_email ? `<div style="color:var(--muted);font-size:12px">📧 ${app.contact_email}</div>` : ''}
+              ${app.social_link   ? `<div style="color:var(--muted);font-size:12px">🔗 ${app.social_link}</div>`   : ''}
+            </div>` : ''}
+          ${actions}
+        </div>
+      `;
+    }
+
+    async function setStatus(userId, status) {
+      if (updating) return;
+      updating = userId + status;
+
+      // Optimistic update
+      users = users.map(u => u.id === userId ? { ...u, organizer_status: status, organizerStatus: status } : u);
+      if (status !== 'pending') delete appMap[userId];
+      renderList();
+
+      const updates = { organizer_status: status };
+      if (status === 'verified') updates.organizer_verified_at = new Date().toISOString().slice(0, 10);
+      if (status === 'rejected' || status === 'none') updates.organizer_verified_at = null;
+
+      await db.from('profiles').update(updates).eq('id', userId);
+
+      if (status === 'verified' || status === 'rejected') {
+        await db.from('organizer_applications')
+          .update({ status: status === 'verified' ? 'approved' : 'rejected' })
+          .eq('user_id', userId);
+      }
+
+      const notifMap = {
+        verified: { type: 'organizer_approved', title: 'Application approved!', body: 'Your organizer application was approved. You can now post events on Buzaar.' },
+        rejected: { type: 'organizer_rejected', title: 'Application not approved', body: 'Your organizer application was reviewed and not approved at this time.' },
+        none:     { type: 'organizer_revoked',  title: 'Organizer status removed', body: 'Your organizer verification has been revoked by an admin.' },
+      };
+      const n = notifMap[status];
+      if (n) {
+        await db.from('notifications').insert({ user_id: userId, type: n.type, read: false, data: { title: n.title, body: n.body } });
+      }
+
+      updating = null;
+      showToast(status === 'verified' ? 'Organizer approved ✓' : status === 'rejected' ? 'Application rejected' : 'Verification revoked');
+    }
+
+    document.getElementById('tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-tab]');
+      if (!btn) return;
+      activeTab = btn.dataset.tab;
+      document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      renderList();
+    });
+  </script>
+</body>
+</html>

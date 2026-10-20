@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Buzaar Admin — Sign In</title>
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body class="login-page">
+
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-text">⚡ Buzaar Admin</div>
+      <div class="logo-sub">Authorized personnel only</div>
+    </div>
+
+    <div id="err" class="alert alert-red" style="display:none;"></div>
+    <div id="debug" class="alert alert-amber" style="display:none;font-size:11px;word-break:break-all;"></div>
+
+    <div class="form-group">
+      <label for="email">Email</label>
+      <input type="email" id="email" placeholder="admin@buzaar.app" autocomplete="email">
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary btn-full" id="login-btn">Sign In</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="./admin.js"></script>
+  <script>
+    const db = getDb();
+
+    // Show debug message if redirected with error
+    const params = new URLSearchParams(window.location.search);
+    const errParam = params.get('err');
+    const uid = params.get('uid');
+    if (errParam) {
+      const dbg = document.getElementById('debug');
+      dbg.style.display = 'block';
+      if (errParam === 'no_session') {
+        dbg.textContent = 'Debug: No session found. Please sign in.';
+      } else if (errParam === 'not_admin') {
+        dbg.textContent = `Debug: Signed in but is_admin = false. Run this in Supabase SQL Editor: UPDATE public.profiles SET is_admin = true WHERE id = '${uid}';`;
+      }
+    }
+
+    // Auto-redirect if already signed in as admin
+    db.auth.getSession().then(({ data: { session } }) => {
+      if (!session) return;
+      db.from('profiles').select('is_admin').eq('id', session.user.id).single()
+        .then(({ data }) => { if (data?.is_admin) window.location.href = './dashboard.html'; });
+    });
+
+    async function doLogin() {
+      const email    = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const btn      = document.getElementById('login-btn');
+      const err      = document.getElementById('err');
+
+      err.style.display = 'none';
+      btn.disabled      = true;
+      btn.textContent   = 'Signing in…';
+
+      const { data, error } = await db.auth.signInWithPassword({ email, password });
+      if (error) {
+        err.textContent   = error.message;
+        err.style.display = 'block';
+        btn.disabled      = false;
+        btn.textContent   = 'Sign In';
+        return;
+      }
+
+      const { data: profile } = await db
+        .from('profiles').select('is_admin').eq('id', data.user.id).single();
+
+      if (!profile?.is_admin) {
+        await db.auth.signOut();
+        err.textContent   = 'Access denied. This account is not an admin.';
+        err.style.display = 'block';
+        btn.disabled      = false;
+        btn.textContent   = 'Sign In';
+        return;
+      }
+
+      window.location.href = './dashboard.html';
+    }
+
+    document.getElementById('login-btn').addEventListener('click', doLogin);
+    document.getElementById('password').addEventListener('keydown', e => {
+      if (e.key === 'Enter') doLogin();
+    });
+  </script>
+</body>
+</html>

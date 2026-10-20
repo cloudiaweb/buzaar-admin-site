@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Notify — Buzaar Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body>
+  <nav id="nav"></nav>
+
+  <main id="content">
+    <div class="page-title">Broadcast Notification</div>
+    <div class="page-subtitle">Send a push notification to all Buzaar users</div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <!-- Compose -->
+      <div>
+        <div class="card" style="margin-bottom:0">
+          <div style="font-weight:700;font-size:14px;margin-bottom:16px">Compose</div>
+
+          <div class="form-group">
+            <label for="notif-title">Title</label>
+            <input type="text" id="notif-title" placeholder="e.g. New event in Makati!" maxlength="65" oninput="updatePreview()">
+            <div style="color:var(--muted);font-size:11px;text-align:right;margin-top:3px"><span id="title-count">0</span>/65</div>
+          </div>
+
+          <div class="form-group">
+            <label for="notif-body">Message</label>
+            <textarea id="notif-body" placeholder="e.g. Check out the latest events near you…" maxlength="200" oninput="updatePreview()"></textarea>
+            <div style="color:var(--muted);font-size:11px;text-align:right;margin-top:3px"><span id="body-count">0</span>/200</div>
+          </div>
+
+          <div class="form-group">
+            <label for="notif-target">Send to</label>
+            <select id="notif-target">
+              <option value="all">All users</option>
+              <option value="organizers">Verified organizers only</option>
+            </select>
+          </div>
+
+          <div id="send-status"></div>
+
+          <button class="btn btn-yellow btn-full" id="send-btn" onclick="sendBroadcast()">
+            📣 Send Broadcast
+          </button>
+        </div>
+      </div>
+
+      <!-- Preview + history -->
+      <div>
+        <div style="font-weight:700;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px">Preview</div>
+        <div class="notif-preview" id="preview">
+          <div class="notif-preview-title" id="preview-title" style="color:var(--muted)">Your notification title</div>
+          <div class="notif-preview-body"  id="preview-body">Your message will appear here…</div>
+        </div>
+
+        <div style="font-weight:700;font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:10px;margin-top:24px">Recent Broadcasts</div>
+        <div id="history">
+          <div style="color:var(--muted);font-size:13px">No broadcasts yet this session.</div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="./admin.js"></script>
+  <script>
+    const db = getDb();
+    const history = [];
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+      renderNav('notifications');
+    })();
+
+    function updatePreview() {
+      const title = document.getElementById('notif-title').value;
+      const body  = document.getElementById('notif-body').value;
+
+      document.getElementById('preview-title').textContent = title || 'Your notification title';
+      document.getElementById('preview-title').style.color = title ? 'var(--text)' : 'var(--muted)';
+      document.getElementById('preview-body').textContent  = body  || 'Your message will appear here…';
+
+      document.getElementById('title-count').textContent = title.length;
+      document.getElementById('body-count').textContent  = body.length;
+    }
+
+    async function sendBroadcast() {
+      const title  = document.getElementById('notif-title').value.trim();
+      const body   = document.getElementById('notif-body').value.trim();
+      const target = document.getElementById('notif-target').value;
+
+      if (!title || !body) {
+        showToast('Title and message are required', 'error');
+        return;
+      }
+
+      const btn    = document.getElementById('send-btn');
+      const status = document.getElementById('send-status');
+      btn.disabled = true;
+      btn.textContent = 'Fetching tokens…';
+      status.innerHTML = '';
+
+      // Fetch push tokens
+      let query = db.from('profiles').select('push_token, organizer_status').not('push_token', 'is', null);
+      if (target === 'organizers') {
+        query = query.eq('organizer_status', 'verified');
+      }
+
+      const { data: profiles, error } = await query;
+
+      if (error) {
+        showToast('Failed to fetch users', 'error');
+        btn.disabled = false;
+        btn.textContent = '📣 Send Broadcast';
+        return;
+      }
+
+      const tokens = (profiles || []).map(p => p.push_token).filter(Boolean);
+
+      if (tokens.length === 0) {
+        showToast('No push tokens found — users may not have enabled notifications', 'error');
+        btn.disabled = false;
+        btn.textContent = '📣 Send Broadcast';
+        return;
+      }
+
+      btn.textContent = `Sending to ${tokens.length} users…`;
+
+      // Chunk into batches of 100 (Expo limit)
+      const chunks  = [];
+      for (let i = 0; i < tokens.length; i += 100) {
+        chunks.push(tokens.slice(i, i + 100).map(token => ({
+          to: token,
+          title,
+          body,
+          sound: 'default',
+          data: { type: 'broadcast' },
+        })));
+      }
+
+      let successCount = 0;
+      let failCount    = 0;
+
+      for (const chunk of chunks) {
+        try {
+          const res  = await fetch('https://exp.host/--/api/v2/push/send', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body:    JSON.stringify(chunk),
+          });
+          const json = await res.json();
+          const data = json.data || [];
+          data.forEach(r => { if (r.status === 'ok') successCount++; else failCount++; });
+        } catch {
+          failCount += chunk.length;
+        }
+      }
+
+      const timestamp = new Date().toLocaleString('en-PH', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      history.unshift({ title, body, target, successCount, failCount, timestamp });
+      renderHistory();
+
+      status.innerHTML = `
+        <div class="alert ${failCount === 0 ? 'alert-teal' : 'alert-amber'}" style="margin-bottom:14px">
+          Sent to <strong>${successCount}</strong> users${failCount > 0 ? `, ${failCount} failed` : ''}.
+        </div>`;
+
+      document.getElementById('notif-title').value = '';
+      document.getElementById('notif-body').value  = '';
+      updatePreview();
+
+      showToast(`Broadcast sent to ${successCount} users`);
+      btn.disabled    = false;
+      btn.textContent = '📣 Send Broadcast';
+    }
+
+    function renderHistory() {
+      const el = document.getElementById('history');
+      if (history.length === 0) {
+        el.innerHTML = '<div style="color:var(--muted);font-size:13px">No broadcasts yet this session.</div>';
+        return;
+      }
+      el.innerHTML = history.map(h => `
+        <div class="card" style="padding:12px;margin-bottom:8px">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+            <div>
+              <div style="font-weight:700;font-size:13px">${h.title}</div>
+              <div style="color:var(--muted);font-size:12px;margin-top:2px">${h.body}</div>
+            </div>
+            <span class="badge badge-teal" style="white-space:nowrap">${h.successCount} sent</span>
+          </div>
+          <div style="color:var(--muted);font-size:11px;margin-top:8px">
+            ${h.target === 'all' ? 'All users' : 'Organizers only'} · ${h.timestamp}
+            ${h.failCount > 0 ? ` · <span style="color:var(--amber)">${h.failCount} failed</span>` : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+  </script>
+</body>
+</html>
