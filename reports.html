@@ -87,16 +87,23 @@
     }
 
     async function fetchReportMedia(list) {
-      const bountyIds  = [...new Set(list.filter(r => r.reported_type === 'bounty').map(r => r.reported_id).filter(Boolean))];
-      const profileIds = [...new Set(list.filter(r => r.reported_type === 'profile').map(r => r.reported_id).filter(Boolean))];
+      const ids = (type) => [...new Set(list.filter(r => r.reported_type === type).map(r => r.reported_id).filter(Boolean))];
+      const bountyIds  = ids('bounty');
+      const profileIds = ids('profile');
+      const eventIds   = ids('event');
+      const offerIds   = ids('offer');
 
-      const [bountyRes, profileRes] = await Promise.all([
-        bountyIds.length  ? db.from('bounties').select('id, item, photo').in('id', bountyIds) : { data: [] },
-        profileIds.length ? db.from('profiles').select('id, display_name, photo_url').in('id', profileIds) : { data: [] },
+      const [bountyRes, profileRes, eventRes, offerRes] = await Promise.all([
+        bountyIds.length  ? db.from('bounties').select('id, item, photo, category, price').in('id', bountyIds) : { data: [] },
+        profileIds.length ? db.from('profiles').select('id, display_name, handle, photo_url').in('id', profileIds) : { data: [] },
+        eventIds.length   ? db.from('events').select('id, name, photo, date, location').in('id', eventIds) : { data: [] },
+        offerIds.length   ? db.from('offers').select('id, price, currency, bounty:bounties!bounty_id(item, photo)').in('id', offerIds) : { data: [] },
       ]);
 
-      (bountyRes.data  || []).forEach(b => { mediaMap[b.id] = { type: 'bounty',  photo: b.photo,     label: b.item }; });
-      (profileRes.data || []).forEach(p => { mediaMap[p.id] = { type: 'profile', photo: p.photo_url, label: p.display_name }; });
+      (bountyRes.data  || []).forEach(b => { mediaMap[b.id] = { type: 'bounty',  photo: b.photo,     label: b.item,  sub: b.category, price: b.price }; });
+      (profileRes.data || []).forEach(p => { mediaMap[p.id] = { type: 'profile', photo: p.photo_url, label: p.display_name, sub: p.handle ? '@' + p.handle : '' }; });
+      (eventRes.data   || []).forEach(e => { mediaMap[e.id] = { type: 'event',   photo: e.photo,     label: e.name,  sub: e.location || e.date }; });
+      (offerRes.data   || []).forEach(o => { mediaMap[o.id] = { type: 'offer',   photo: o.bounty?.photo, label: o.bounty?.item || 'Offer', sub: o.price ? `₱${Number(o.price).toLocaleString()}` : '' }; });
     }
 
     function getFiltered() {
@@ -147,12 +154,17 @@
 
             ${mediaMap[r.reported_id] ? (() => {
                 const m = mediaMap[r.reported_id];
-                return `<div style="display:flex;align-items:center;gap:12px;background:var(--surface2);border-radius:10px;padding:10px;margin-bottom:10px">
+                const icon = { profile: '👤', event: '📅', offer: '💬', bounty: '📦' }[m.type] || '📦';
+                return `<div style="display:flex;align-items:center;gap:12px;background:var(--surface2);border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid var(--border)">
                   ${m.photo
-                    ? `<img src="${escHtml(m.photo)}" style="width:56px;height:56px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)">`
-                    : `<div style="width:56px;height:56px;border-radius:8px;background:var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px">${m.type === 'profile' ? '👤' : '📦'}</div>`
+                    ? `<img src="${escHtml(m.photo)}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)">`
+                    : `<div style="width:64px;height:64px;border-radius:10px;background:var(--surface);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:26px;border:1px solid var(--border)">${icon}</div>`
                   }
-                  <div style="font-size:13px;font-weight:600;color:var(--text)">${escHtml(m.label || '—')}</div>
+                  <div style="min-width:0">
+                    <div style="font-size:13px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(m.label || '—')}</div>
+                    ${m.sub ? `<div style="font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(m.sub)}</div>` : ''}
+                    ${m.price ? `<div style="font-size:12px;color:var(--yellow);font-weight:600;margin-top:2px">₱${Number(m.price).toLocaleString()}</div>` : ''}
+                  </div>
                 </div>`;
               })() : ''}
 
