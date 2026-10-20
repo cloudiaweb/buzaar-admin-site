@@ -42,11 +42,31 @@
     </div>
   </div>
 
+  <!-- Delete modal -->
+  <div class="modal-overlay" id="delete-modal">
+    <div class="modal">
+      <div class="modal-title">Remove Content?</div>
+      <div class="modal-sub">The content will be removed and the user will be notified with the report reason.</div>
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
+        <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Content</div>
+        <div style="font-size:14px;font-weight:700" id="delete-content-name">—</div>
+      </div>
+      <div style="background:rgba(255,59,48,0.08);border:1px solid rgba(255,59,48,0.2);border-radius:10px;padding:12px;margin-bottom:4px">
+        <div style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Reason sent to user</div>
+        <div style="font-size:13px;color:var(--text)" id="delete-reason-text">—</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeDeleteModal()">Cancel</button>
+        <button class="btn btn-red" id="delete-confirm-btn" onclick="confirmDelete()">Remove &amp; Notify User</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script src="./admin.js"></script>
   <script>
     const db = getDb();
-    let reports = [], activeTab = 'pending', resolveTarget = null;
+    let reports = [], activeTab = 'pending', resolveTarget = null, deleteTarget = null;
     let adminId = null;
     const mediaMap = {};
     let currentPage = 1, pageSize = 10;
@@ -96,16 +116,16 @@
       const offerIds   = ids('offer');
 
       const [bountyRes, profileRes, eventRes, offerRes] = await Promise.all([
-        bountyIds.length  ? db.from('bounties').select('id, item, photo, category, price').in('id', bountyIds) : { data: [] },
+        bountyIds.length  ? db.from('bounties').select('id, item, photo, category, price, poster_id').in('id', bountyIds) : { data: [] },
         profileIds.length ? db.from('profiles').select('id, display_name, handle, photo_url').in('id', profileIds) : { data: [] },
-        eventIds.length   ? db.from('events').select('id, name, photo, date, location').in('id', eventIds) : { data: [] },
-        offerIds.length   ? db.from('offers').select('id, price, currency, bounty:bounties!bounty_id(item, photo)').in('id', offerIds) : { data: [] },
+        eventIds.length   ? db.from('events').select('id, name, photo, date, location, organizer_id').in('id', eventIds) : { data: [] },
+        offerIds.length   ? db.from('offers').select('id, price, currency, seller_id, bounty:bounties!bounty_id(item, photo)').in('id', offerIds) : { data: [] },
       ]);
 
-      (bountyRes.data  || []).forEach(b => { mediaMap[b.id] = { type: 'bounty',  photo: b.photo,     label: b.item,  sub: b.category, price: b.price }; });
-      (profileRes.data || []).forEach(p => { mediaMap[p.id] = { type: 'profile', photo: p.photo_url, label: p.display_name, sub: p.handle ? '@' + p.handle : '' }; });
-      (eventRes.data   || []).forEach(e => { mediaMap[e.id] = { type: 'event',   photo: e.photo,     label: e.name,  sub: e.location || e.date }; });
-      (offerRes.data   || []).forEach(o => { mediaMap[o.id] = { type: 'offer',   photo: o.bounty?.photo, label: o.bounty?.item || 'Offer', sub: o.price ? `₱${Number(o.price).toLocaleString()}` : '' }; });
+      (bountyRes.data  || []).forEach(b => { mediaMap[b.id] = { type: 'bounty',  photo: b.photo,     label: b.item,  sub: b.category, price: b.price, ownerId: b.poster_id }; });
+      (profileRes.data || []).forEach(p => { mediaMap[p.id] = { type: 'profile', photo: p.photo_url, label: p.display_name, sub: p.handle ? '@' + p.handle : '', ownerId: p.id }; });
+      (eventRes.data   || []).forEach(e => { mediaMap[e.id] = { type: 'event',   photo: e.photo,     label: e.name,  sub: e.location || e.date, ownerId: e.organizer_id }; });
+      (offerRes.data   || []).forEach(o => { mediaMap[o.id] = { type: 'offer',   photo: o.bounty?.photo, label: o.bounty?.item || 'Offer', sub: o.price ? `₱${Number(o.price).toLocaleString()}` : '', ownerId: o.seller_id }; });
     }
 
     function getFiltered() {
@@ -164,7 +184,7 @@
                 const icon = { profile: '👤', event: '📅', offer: '💬', bounty: '📦' }[m.type] || '📦';
                 return `<div style="display:flex;align-items:center;gap:12px;background:var(--surface2);border-radius:10px;padding:10px;margin-bottom:10px;border:1px solid var(--border)">
                   ${m.photo
-                    ? `<img src="${escHtml(m.photo)}" style="width:64px;height:64px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)">`
+                    ? `<img src="${escHtml(m.photo)}" onclick="openLightbox('${escHtml(m.photo)}')" style="width:64px;height:64px;border-radius:10px;object-fit:cover;flex-shrink:0;border:1px solid var(--border);cursor:zoom-in">`
                     : `<div style="width:64px;height:64px;border-radius:10px;background:var(--surface);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:26px;border:1px solid var(--border)">${icon}</div>`
                   }
                   <div style="min-width:0">
@@ -189,6 +209,7 @@
 
             ${r.status === 'pending' ? `
               <div class="btn-row">
+                <button class="btn btn-red btn-sm" onclick="openDeleteModal('${r.id}')">🗑 Remove Content</button>
                 <button class="btn btn-teal btn-sm" onclick="openResolveModal('${r.id}','resolve')">✓ Resolve</button>
                 <button class="btn btn-ghost btn-sm" onclick="openResolveModal('${r.id}','dismiss')">Dismiss</button>
               </div>` : `
@@ -241,6 +262,69 @@
       document.getElementById('pending-badge').textContent = pending > 0 ? `(${pending})` : '';
     }
 
+    function openDeleteModal(reportId) {
+      const r = reports.find(x => x.id === reportId);
+      if (!r) return;
+      const m = mediaMap[r.reported_id] || {};
+      deleteTarget = { reportId, type: r.reported_type, targetId: r.reported_id, ownerId: m.ownerId, reason: r.reason };
+      document.getElementById('delete-content-name').textContent = m.label || r.reported_type || '—';
+      document.getElementById('delete-reason-text').textContent  = r.reason || '—';
+      document.getElementById('delete-modal').classList.add('open');
+    }
+
+    function closeDeleteModal() {
+      document.getElementById('delete-modal').classList.remove('open');
+      deleteTarget = null;
+    }
+
+    async function confirmDelete() {
+      if (!deleteTarget) return;
+      const btn = document.getElementById('delete-confirm-btn');
+      btn.disabled = true;
+      btn.textContent = 'Removing…';
+
+      const { type, targetId, ownerId, reason, reportId } = deleteTarget;
+
+      // Deactivate content
+      if (type === 'bounty') {
+        await db.from('bounties').update({ is_active: false }).eq('id', targetId);
+      } else if (type === 'event') {
+        await db.from('events').update({ is_active: false }).eq('id', targetId);
+      }
+
+      // Notify content owner
+      if (ownerId) {
+        const contentWord = { bounty: 'chase', event: 'event', offer: 'offer', profile: 'account' }[type] || type;
+        const isProfile   = type === 'profile';
+        await db.from('notifications').insert({
+          user_id: ownerId,
+          type: 'post_removed',
+          read: false,
+          data: {
+            title: isProfile ? 'Account warning' : `Your ${contentWord} was removed`,
+            body:  `${isProfile ? 'Your account received a flag' : `Your ${contentWord} was removed`} due to a report: "${reason}"`,
+          },
+        });
+      }
+
+      // Resolve the report
+      const now = new Date().toISOString();
+      const updateData = { status: 'resolved', admin_note: `Content removed. Reason: ${reason}`, resolved_at: now };
+      if (adminId) updateData.resolved_by = adminId;
+
+      const { error } = await db.from('reports').update(updateData).eq('id', reportId);
+      if (error) { showToast('Failed to update report', 'error'); btn.disabled = false; btn.textContent = 'Remove & Notify User'; closeDeleteModal(); return; }
+
+      reports = reports.map(r => r.id === reportId ? { ...r, ...updateData } : r);
+      closeDeleteModal();
+      renderList();
+      showToast('Content removed and user notified');
+      const pending = reports.filter(r => r.status === 'pending').length;
+      document.getElementById('pending-badge').textContent = pending > 0 ? `(${pending})` : '';
+      btn.disabled = false;
+      btn.textContent = 'Remove & Notify User';
+    }
+
     function gotoPage(n)    { currentPage = n; renderList(); }
     function setPageSize(n) { pageSize = parseInt(n); currentPage = 1; renderList(); }
 
@@ -256,6 +340,10 @@
 
     document.getElementById('resolve-modal').addEventListener('click', e => {
       if (e.target === e.currentTarget) closeResolveModal();
+    });
+
+    document.getElementById('delete-modal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeDeleteModal();
     });
   </script>
 </body>

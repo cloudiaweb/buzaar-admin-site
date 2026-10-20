@@ -143,7 +143,7 @@
         <div class="card" id="card-${id}">
           <div class="card-header" style="margin-bottom:0">
             ${photo
-            ? `<div class="avatar"><img src="${photo}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>`
+            ? `<div class="avatar" style="cursor:zoom-in" onclick="openLightbox('${escHtml(photo)}')"><img src="${escHtml(photo)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>`
             : `<div class="avatar" style="background:${bg}30;color:${bg}">${avatarInitial(name)}</div>`
           }
             <div style="flex:1">

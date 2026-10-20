@@ -130,6 +130,21 @@ function avatarBg(str) {
   return palette[Math.abs(h) % palette.length];
 }
 
+function openLightbox(src) {
+  let lb = document.getElementById('_lightbox');
+  if (!lb) {
+    lb = document.createElement('div');
+    lb.id = '_lightbox';
+    lb.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9000;align-items:center;justify-content:center;cursor:zoom-out;padding:24px';
+    lb.onclick = () => { lb.style.display = 'none'; };
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') lb.style.display = 'none'; });
+    lb.innerHTML = '<img id="_lightbox_img" style="max-width:92vw;max-height:92vh;border-radius:14px;object-fit:contain;box-shadow:0 8px 60px rgba(0,0,0,0.8)">';
+    document.body.appendChild(lb);
+  }
+  document.getElementById('_lightbox_img').src = src;
+  lb.style.display = 'flex';
+}
+
 function paginateList(list, page, size) {
   const totalPages = Math.max(1, Math.ceil(list.length / size));
   const safePage   = Math.min(Math.max(1, page), totalPages);
