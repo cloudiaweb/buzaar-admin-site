@@ -89,7 +89,7 @@
       let raw = data;
       if (!raw) {
         const res = await db.from('profiles')
-          .select('id, display_name, handle, email, organizer_status, is_admin, is_banned, paid_credits, avatar_color, created_at')
+          .select('id, display_name, handle, email, organizer_status, is_admin, is_banned, paid_credits, avatar_color, photo_url, created_at')
           .eq('is_admin', false)
           .order('created_at', { ascending: false });
         raw = res.data || [];
@@ -118,6 +118,7 @@
         const orgSt   = u.organizer_status || u.organizerStatus || 'none';
         const paid    = u.paid_credits   ?? u.paidCredits   ?? 0;
         const bg      = avatarBg(name);
+        const photo   = u.photo_url || null;
 
         const orgBadge = {
           verified: '<span class="badge badge-teal">✓ Organizer</span>',
@@ -134,7 +135,10 @@
           <tr>
             <td>
               <div class="user-cell">
-                <div class="avatar" style="background:${bg}30;color:${bg};font-size:13px">${avatarInitial(name)}</div>
+                ${photo
+                  ? `<div class="avatar"><img src="${photo}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;"></div>`
+                  : `<div class="avatar" style="background:${bg}30;color:${bg};font-size:13px">${avatarInitial(name)}</div>`
+                }
                 <div>
                   <div class="user-name">${name}</div>
                   <div class="user-sub">${handle}</div>

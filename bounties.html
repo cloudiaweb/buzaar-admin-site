@@ -77,7 +77,7 @@
       const { data, error } = await db
         .from('bounties')
         .select(`
-          id, item, category, price, condition, is_active, found, created_at, poster_id, event_name, bounty_type,
+          id, item, category, price, condition, is_active, found, created_at, poster_id, event_name, bounty_type, photo,
           poster:profiles!poster_id(id, display_name, handle)
         `)
         .order('created_at', { ascending: false })
@@ -134,8 +134,16 @@
         return `
           <tr>
             <td>
-              <strong style="font-size:13px">${b.item || '—'}</strong>
-              ${b.category ? `<div style="color:var(--muted);font-size:11px">${b.category}</div>` : ''}
+              <div style="display:flex;align-items:center;gap:10px">
+                ${b.photo
+                  ? `<img src="${escHtml(b.photo)}" style="width:40px;height:40px;border-radius:8px;object-fit:cover;flex-shrink:0;border:1px solid var(--border)">`
+                  : `<div style="width:40px;height:40px;border-radius:8px;background:var(--surface2);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:16px">📦</div>`
+                }
+                <div>
+                  <strong style="font-size:13px">${escHtml(b.item || '—')}</strong>
+                  ${b.category ? `<div style="color:var(--muted);font-size:11px">${escHtml(b.category)}</div>` : ''}
+                </div>
+              </div>
             </td>
             <td><div class="user-cell">${poster}</div></td>
             <td style="color:var(--muted);font-size:12px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.event_name || '—'}</td>
