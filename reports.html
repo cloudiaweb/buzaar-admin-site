@@ -175,7 +175,12 @@
       const updateData = { status, admin_note: note || null, resolved_at: now };
       if (adminId) updateData.resolved_by = adminId;
 
-      await db.from('reports').update(updateData).eq('id', resolveTarget.id);
+      const { error } = await db.from('reports').update(updateData).eq('id', resolveTarget.id);
+      if (error) {
+        showToast('Failed to update report', 'error');
+        closeResolveModal();
+        return;
+      }
 
       reports = reports.map(r => r.id === resolveTarget.id
         ? { ...r, status, admin_note: note || null, resolved_at: now }

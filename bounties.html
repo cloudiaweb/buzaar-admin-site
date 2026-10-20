@@ -50,8 +50,8 @@
   <!-- Confirm deactivate modal -->
   <div class="modal-overlay" id="confirm-modal">
     <div class="modal">
-      <div class="modal-title">Remove Bounty?</div>
-      <div class="modal-sub" id="confirm-item">This will deactivate the bounty and hide it from the app.</div>
+      <div class="modal-title">Remove Chase?</div>
+      <div class="modal-sub" id="confirm-item">This will deactivate the chase and hide it from the app.</div>
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
         <button class="btn btn-red" id="confirm-btn" onclick="confirmRemove()">Remove</button>
@@ -64,6 +64,7 @@
   <script>
     const db = getDb();
     let allBounties = [], activeTab = 'active', removeTarget = null;
+    const bountyNameMap = {};
 
     (async () => {
       const admin = await requireAdmin();
@@ -113,11 +114,12 @@
       const list  = getFiltered();
 
       if (list.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><h3>No bounties found</h3></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8"><div class="empty-state"><h3>No chases found</h3></div></td></tr>';
         return;
       }
 
       tbody.innerHTML = list.map(b => {
+        bountyNameMap[b.id] = b.item || '';
         const status = b.found
           ? '<span class="badge badge-teal">Found</span>'
           : b.is_active
@@ -143,7 +145,7 @@
             <td>${status}</td>
             <td>
               ${b.is_active && !b.found
-                ? `<button class="btn btn-red btn-xs" onclick="openRemove('${b.id}','${(b.item || '').replace(/'/g,"\\'")}')">Remove</button>`
+                ? `<button class="btn btn-red btn-xs" onclick="openRemove('${b.id}')">Remove</button>`
                 : '<span style="color:var(--muted);font-size:12px">—</span>'
               }
             </td>
@@ -152,8 +154,9 @@
       }).join('');
     }
 
-    function openRemove(id, name) {
+    function openRemove(id) {
       removeTarget = id;
+      const name = bountyNameMap[id] || 'this chase';
       document.getElementById('confirm-item').textContent = `Remove "${name}"? This will deactivate it and hide it from all users.`;
       document.getElementById('confirm-modal').classList.add('open');
     }
@@ -173,7 +176,7 @@
 
       closeModal();
       renderTable();
-      showToast('Bounty removed');
+      showToast('Chase removed');
       btn.disabled = false;
     }
 

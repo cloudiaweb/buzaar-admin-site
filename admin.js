@@ -96,6 +96,15 @@ function avatarInitial(name) {
   return (name || '?')[0].toUpperCase();
 }
 
+function escHtml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function avatarBg(str) {
   const palette = ['#FF6B6B','#4ECDC4','#45B7D1','#96E6A1','#DDA0DD','#F7DC6F','#82E0AA','#FF9F43'];
   let h = 0;

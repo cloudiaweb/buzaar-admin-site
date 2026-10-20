@@ -484,8 +484,16 @@ select option { background: var(--surface2); }
 .notif-preview-title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
 .notif-preview-body  { font-size: 12px; color: var(--muted); }
 
+/* ── Notify grid ── */
+.notify-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+
 /* ── Responsive ── */
 @media (max-width: 640px) {
+  .notify-grid { grid-template-columns: 1fr; }
   #nav { padding: 0 14px; gap: 12px; }
   .nav-links { overflow-x: auto; }
   .nav-link { padding: 5px 8px; font-size: 12px; }

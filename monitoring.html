@@ -159,7 +159,7 @@
             <div class="alert-meta">${timeAgo(a.created_at)}${a.resolved ? ' · Resolved' : ''}</div>
           </div>
           ${!a.resolved ? `
-            <button class="btn btn-ghost btn-xs" onclick="resolveAlert(${a.id}, this)">
+            <button class="btn btn-ghost btn-xs" onclick="resolveAlert('${a.id}', this)">
               Mark resolved
             </button>
           ` : `<span class="badge badge-muted" style="flex-shrink:0">Resolved</span>`}
@@ -292,14 +292,6 @@
     });
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-    function escHtml(str) {
-      return String(str ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
-
     function timeAgo(iso) {
       const diff = Date.now() - new Date(iso).getTime();
       const mins = Math.floor(diff / 60000);

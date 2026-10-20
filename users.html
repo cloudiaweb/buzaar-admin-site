@@ -74,6 +74,7 @@
     const db = getDb();
     let allUsers = [];
     let creditTarget = null;
+    const creditUserMap = {};
 
     (async () => {
       const admin = await requireAdmin();
@@ -102,13 +103,14 @@
     function renderTable(users) {
       const tbody = document.getElementById('users-body');
       if (users.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><h3>No users found</h3></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><h3>No users found</h3></div></td></tr>';
         return;
       }
 
       tbody.innerHTML = users.map(u => {
         const id      = u.id;
         const name    = u.display_name || u.displayName || '(no name)';
+        creditUserMap[id] = { id, name, paid: u.paid_credits ?? u.paidCredits ?? 0 };
         const handle  = u.handle ? `@${u.handle}` : '';
         const email   = u.email || '—';
         const joined  = formatDate(u.created_at || u.createdAt);
@@ -145,7 +147,7 @@
             <td>
               <div style="display:flex;gap:6px;align-items:center">
                 <span style="color:var(--yellow);font-weight:700">${paid}</span>
-                <button class="btn btn-ghost btn-xs" onclick='openCreditsModal(${JSON.stringify({ id, name, paid })})'>Edit</button>
+                <button class="btn btn-ghost btn-xs" onclick="openCreditsModal('${id}')">Edit</button>
               </div>
             </td>
             <td>${statusBadge}</td>
@@ -182,7 +184,9 @@
       showToast('Organizer status revoked');
     }
 
-    function openCreditsModal(user) {
+    function openCreditsModal(userId) {
+      const user = creditUserMap[userId];
+      if (!user) return;
       creditTarget = user;
       document.getElementById('credits-modal-name').textContent = user.name;
       document.getElementById('current-paid').textContent  = user.paid;
@@ -207,12 +211,18 @@
       const current = creditTarget.paid;
       const newVal  = Math.max(0, current + amount);
 
-      await db.from('profiles').update({ paid_credits: newVal }).eq('id', creditTarget.id);
+      const { error } = await db.from('profiles').update({ paid_credits: newVal }).eq('id', creditTarget.id);
+      if (error) {
+        showToast('Failed to update credits', 'error');
+        btn.disabled = false;
+        return;
+      }
 
       allUsers = allUsers.map(u => {
         if (u.id !== creditTarget.id) return u;
         return { ...u, paid_credits: newVal, paidCredits: newVal };
       });
+      creditUserMap[creditTarget.id] = { ...creditTarget, paid: newVal };
 
       renderTable(filterUsers());
       closeCreditsModal();
