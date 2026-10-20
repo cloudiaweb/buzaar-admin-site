@@ -68,13 +68,18 @@
         .limit(500);
 
       if (error) {
-        document.getElementById('bounty-count').textContent = 'Error loading chases: ' + error.message;
+        document.getElementById('bounty-count').textContent = 'Error loading chases';
+        document.getElementById('bounty-grid').innerHTML =
+          `<div style="grid-column:1/-1"><div class="empty-state"><h3>Could not load chases</h3><p style="font-size:13px;color:var(--muted)">${error.message}</p></div></div>`;
         return;
       }
 
       allBounties = data || [];
       document.getElementById('bounty-count').textContent = `${allBounties.length} chases total`;
-      renderTable();
+      try { renderTable(); } catch (e) {
+        document.getElementById('bounty-grid').innerHTML =
+          `<div style="grid-column:1/-1"><div class="empty-state"><h3>Render error</h3><p style="font-size:13px;color:var(--muted)">${e.message}</p></div></div>`;
+      }
     }
 
     function getFiltered() {
@@ -131,7 +136,7 @@
           <div class="chase-card">
             <div class="chase-photo">
               ${b.photo
-                ? `<img src="${escHtml(b.photo)}" onclick="openLightbox('${escHtml(b.photo)}')" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in">`
+                ? `<img src="${escHtml(b.photo)}" data-photo="${escHtml(b.photo)}" onclick="openLightbox(this.dataset.photo)" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in">`
                 : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:36px;color:var(--muted)">📦</div>`
               }
               <div class="chase-badges">
