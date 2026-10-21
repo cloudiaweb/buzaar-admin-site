@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Events — Buzaar Admin</title>
+  <link rel="stylesheet" href="./admin.css">
+</head>
+<body>
+  <nav id="nav"></nav>
+
+  <main id="content">
+    <div class="page-title">Events</div>
+    <div class="page-subtitle" id="event-count">Loading…</div>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-tab="upcoming">Upcoming</button>
+      <button class="tab" data-tab="live">Live</button>
+      <button class="tab" data-tab="past">Past</button>
+      <button class="tab" data-tab="all">All</button>
+    </div>
+
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" id="search" placeholder="Search by name, location, or organizer…">
+    </div>
+
+    <div id="pagination"></div>
+    <div id="event-grid" class="chase-grid">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+  </main>
+
+  <!-- Deactivate modal -->
+  <div class="modal-overlay" id="confirm-modal">
+    <div class="modal">
+      <div class="modal-title">Deactivate Event?</div>
+      <div class="modal-sub" id="confirm-name">This will remove the event from the app.</div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-red" id="confirm-btn" onclick="confirmDeactivate()">Deactivate</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="./admin.js"></script>
+  <script>
+    const db = getDb();
+    let allEvents = [], activeTab = 'upcoming', removeTarget = null;
+    const eventNameMap = {};
+    let currentPage = 1, pageSize = 10;
+    let reportCountMap = {};
+
+    (async () => {
+      const admin = await requireAdmin();
+      if (!admin) return;
+      await renderNavWithBadges('events');
+      await loadEvents();
+    })();
+
+    async function loadEvents() {
+      const [eventsRes, reportsRes] = await Promise.all([
+        db.from('events')
+          .select('id, name, location, date, date_range, event_dates, photo, status, is_sponsored, attendees, category, region, created_at, organizer_id, organizer:profiles!organizer_id(id, display_name, handle, photo_url)')
+          .not('status', 'eq', 'deleted')
+          .order('created_at', { ascending: false })
+          .limit(500),
+        db.from('reports').select('target_id').eq('type', 'event').limit(2000),
+      ]);
+
+      if (eventsRes.error) {
+        document.getElementById('event-count').textContent = 'Error loading events';
+        document.getElementById('event-grid').innerHTML =
+          `<div style="grid-column:1/-1"><div class="empty-state"><h3>Could not load events</h3><p style="font-size:13px;color:var(--muted)">${eventsRes.error.message}</p></div></div>`;
+        return;
+      }
+
+      allEvents = eventsRes.data || [];
+
+      reportCountMap = {};
+      (reportsRes.data || []).forEach(r => {
+        reportCountMap[r.target_id] = (reportCountMap[r.target_id] || 0) + 1;
+      });
+
+      document.getElementById('event-count').textContent = `${allEvents.length} events total`;
+      try { renderGrid(); } catch (e) {
+        document.getElementById('event-grid').innerHTML =
+          `<div style="grid-column:1/-1"><div class="empty-state"><h3>Render error</h3><p style="font-size:13px;color:var(--muted)">${e.message}</p></div></div>`;
+      }
+    }
+
+    function computeStatus(ev) {
+      if (!ev.event_dates?.length) return ev.status || 'upcoming';
+      const today = new Date().toISOString().slice(0, 10);
+      const dates = ev.event_dates.map(d => d.date).filter(Boolean).sort();
+      if (!dates.length) return ev.status || 'upcoming';
+      if (dates[dates.length - 1] < today) return 'past';
+      if (dates[0] > today) return 'upcoming';
+      return 'live';
+    }
+
+    function getFiltered() {
+      const q = document.getElementById('search').value.toLowerCase();
+      let list = allEvents;
+
+      if (activeTab !== 'all') {
+        list = list.filter(e => computeStatus(e) === activeTab);
+      }
+
+      if (q) list = list.filter(e => {
+        const name = (e.name || '').toLowerCase();
+        const loc  = (e.location || '').toLowerCase();
+        const org  = (e.organizer?.display_name || '').toLowerCase();
+        return name.includes(q) || loc.includes(q) || org.includes(q);
+      });
+
+      return list;
+    }
+
+    function renderGrid() {
+      const grid = document.getElementById('event-grid');
+      const list = getFiltered();
+
+      if (list.length === 0) {
+        grid.innerHTML = '<div style="grid-column:1/-1"><div class="empty-state"><h3>No events found</h3></div></div>';
+        renderPagination('pagination', 1, 1, 0, pageSize, 'gotoPage', 'setPageSize');
+        return;
+      }
+
+      const pg = paginateList(list, currentPage, pageSize);
+      currentPage = pg.page;
+      renderPagination('pagination', pg.page, pg.totalPages, pg.total, pageSize, 'gotoPage', 'setPageSize');
+
+      grid.innerHTML = pg.items.map(e => {
+        eventNameMap[e.id] = e.name || '';
+
+        const st = computeStatus(e);
+        const sBadge = st === 'live'     ? '<span class="badge badge-red">● Live</span>'
+                     : st === 'past'     ? '<span class="badge badge-muted">Ended</span>'
+                     :                    '<span class="badge badge-green">● Upcoming</span>';
+        const hotBadge = e.is_sponsored  ? '<span class="badge badge-yellow">🔥 Hot</span>' : '';
+        const rCount   = reportCountMap[e.id] || 0;
+        const rBadge   = rCount > 0
+          ? `<span class="badge badge-red" style="font-size:10px">🚩 ${rCount}</span>`
+          : '';
+
+        const orgName   = e.organizer?.display_name || '?';
+        const orgHandle = e.organizer?.handle ? `@${e.organizer.handle}` : '';
+        const orgPhoto  = e.organizer?.photo_url || null;
+        const bg        = avatarBg(orgName);
+        const dateStr   = e.date_range || e.date || '—';
+
+        return `
+          <div class="chase-card">
+            <div class="chase-photo">
+              ${e.photo
+                ? `<img src="${escHtml(e.photo)}" data-photo="${escHtml(e.photo)}" onclick="openLightbox(this.dataset.photo)" style="width:100%;height:100%;object-fit:cover;cursor:zoom-in">`
+                : `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:36px;color:var(--muted)">📅</div>`
+              }
+              <div class="chase-badges">
+                ${sBadge}
+                ${hotBadge}
+                ${rBadge}
+              </div>
+            </div>
+            <div class="chase-body">
+              <div class="chase-title">${escHtml(e.name || '—')}</div>
+              ${e.location ? `<div class="chase-category">📍 ${escHtml(e.location)}</div>` : ''}
+              <div class="chase-meta-row">
+                <span style="color:var(--muted);font-size:12px">📆 ${escHtml(dateStr)}</span>
+                ${e.attendees ? `<span class="badge badge-muted" style="font-size:10px">👥 ${e.attendees}</span>` : ''}
+              </div>
+              <div class="chase-footer">
+                <div class="user-cell" style="gap:7px">
+                  ${orgPhoto
+                    ? `<div class="avatar" style="width:26px;height:26px;overflow:hidden"><img src="${escHtml(orgPhoto)}" data-photo="${escHtml(orgPhoto)}" onclick="openLightbox(this.dataset.photo)" style="width:100%;height:100%;border-radius:50%;object-fit:cover;cursor:zoom-in"></div>`
+                    : `<div class="avatar" style="width:26px;height:26px;font-size:11px;background:${bg}30;color:${bg}">${avatarInitial(orgName)}</div>`
+                  }
+                  <div>
+                    <div style="font-size:12px;font-weight:600">${escHtml(orgName)}</div>
+                    ${orgHandle ? `<div style="font-size:11px;color:var(--muted)">${escHtml(orgHandle)}</div>` : ''}
+                  </div>
+                </div>
+                <div style="font-size:11px;color:var(--muted)">${formatDate(e.created_at)}</div>
+              </div>
+              ${st !== 'past'
+                ? `<button class="btn btn-red btn-xs" style="width:100%;margin-top:10px" onclick="openDeactivate('${e.id}')">Deactivate</button>`
+                : ''
+              }
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function openDeactivate(id) {
+      removeTarget = id;
+      const name = eventNameMap[id] || 'this event';
+      document.getElementById('confirm-name').textContent = `Deactivate "${name}"? It will be removed from the app immediately.`;
+      document.getElementById('confirm-modal').classList.add('open');
+    }
+
+    function closeModal() {
+      document.getElementById('confirm-modal').classList.remove('open');
+      removeTarget = null;
+    }
+
+    async function confirmDeactivate() {
+      if (!removeTarget) return;
+      const btn = document.getElementById('confirm-btn');
+      btn.disabled = true;
+
+      await db.from('events').update({ status: 'deleted' }).eq('id', removeTarget);
+      allEvents = allEvents.filter(e => e.id !== removeTarget);
+
+      closeModal();
+      renderGrid();
+      showToast('Event deactivated');
+      btn.disabled = false;
+    }
+
+    function gotoPage(n)    { currentPage = n; renderGrid(); }
+    function setPageSize(n) { pageSize = parseInt(n); currentPage = 1; renderGrid(); }
+
+    document.getElementById('tabs').addEventListener('click', e => {
+      const btn = e.target.closest('[data-tab]');
+      if (!btn) return;
+      activeTab = btn.dataset.tab;
+      currentPage = 1;
+      document.querySelectorAll('#tabs .tab').forEach(t => t.classList.remove('active'));
+      btn.classList.add('active');
+      renderGrid();
+    });
+
+    document.getElementById('search').addEventListener('input', () => { currentPage = 1; renderGrid(); });
+
+    document.getElementById('confirm-modal').addEventListener('click', e => {
+      if (e.target === e.currentTarget) closeModal();
+    });
+  </script>
+</body>
+</html>

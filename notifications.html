@@ -35,7 +35,10 @@
             <label for="notif-target">Send to</label>
             <select id="notif-target">
               <option value="all">All users</option>
-              <option value="organizers">Verified organizers only</option>
+              <option value="organizer_plus">Organizer+ subscribers</option>
+              <option value="collector_plus">Collector+ subscribers</option>
+              <option value="organizers">Verified organizers</option>
+              <option value="free">Free users only</option>
             </select>
           </div>
 
@@ -104,10 +107,11 @@
       status.innerHTML = '';
 
       // Fetch push tokens
-      let query = db.from('profiles').select('push_token, organizer_status').not('push_token', 'is', null);
-      if (target === 'organizers') {
-        query = query.eq('organizer_status', 'verified');
-      }
+      let query = db.from('profiles').select('push_token, subscription_tier, organizer_status').not('push_token', 'is', null);
+      if      (target === 'organizer_plus') query = query.eq('subscription_tier', 'organizer_plus');
+      else if (target === 'collector_plus') query = query.eq('subscription_tier', 'collector_plus');
+      else if (target === 'organizers')     query = query.eq('organizer_status', 'verified');
+      else if (target === 'free')           query = query.or('subscription_tier.eq.free,subscription_tier.is.null');
 
       const { data: profiles, error } = await query;
 
@@ -193,7 +197,7 @@
             <span class="badge badge-teal" style="white-space:nowrap">${h.successCount} sent</span>
           </div>
           <div style="color:var(--muted);font-size:11px;margin-top:8px">
-            ${h.target === 'all' ? 'All users' : 'Organizers only'} · ${h.timestamp}
+            ${{ all: 'All users', organizer_plus: 'Organizer+', collector_plus: 'Collector+', organizers: 'Verified organizers', free: 'Free users' }[h.target] || h.target} · ${h.timestamp}
             ${h.failCount > 0 ? ` · <span style="color:var(--amber)">${h.failCount} failed</span>` : ''}
           </div>
         </div>

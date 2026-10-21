@@ -55,6 +55,7 @@ function renderNav(active, badges = {}) {
     { href: './organizers.html',    label: 'Organizers',  key: 'organizers',   badge: badges.organizers },
     { href: './users.html',         label: 'Users',       key: 'users' },
     { href: './bounties.html',      label: 'Chases',      key: 'bounties' },
+    { href: './events.html',        label: 'Events',      key: 'events' },
     { href: './reports.html',       label: 'Reports',     key: 'reports',      badge: badges.reports },
     { href: './notifications.html', label: 'Notify',      key: 'notifications' },
     { href: './monitoring.html',    label: 'Monitoring',  key: 'monitoring',   badge: badges.monitoring },

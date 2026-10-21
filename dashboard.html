@@ -15,7 +15,12 @@
 
     <div id="alerts-section"></div>
 
-    <div class="section-label" style="margin-top:0">Overview</div>
+    <div class="section-label" style="margin-top:0">Needs Attention</div>
+    <div id="flagged-section">
+      <div class="loading"><div class="spinner"></div></div>
+    </div>
+
+    <div class="section-label">Overview</div>
     <div class="stat-grid" id="stat-grid">
       <div class="loading"><div class="spinner"></div></div>
     </div>
@@ -83,6 +88,7 @@
         { data: oldProfiles },
         { data: bountyPosters },
         { data: eventOrgs },
+        { data: pendingReports },
       ] = await Promise.all([
         db.from('profiles').select('*', { count: 'exact', head: true }).eq('is_admin', false),
         db.from('bounties').select('*', { count: 'exact', head: true }).eq('is_active', true).eq('found', false),
@@ -96,6 +102,7 @@
         db.from('profiles').select('id, created_at').lt('created_at', cut30).eq('is_admin', false),
         db.from('bounties').select('poster_id'),
         db.from('events').select('organizer_id'),
+        db.from('reports').select('type, target_id').eq('status', 'pending').limit(500),
       ]);
 
       allRows = { users: userRows || [], bounties: bountyRows || [], events: eventRows || [] };
@@ -118,6 +125,54 @@
       alerts.innerHTML = items.length
         ? `<div class="alert alert-amber">⚠️ Action needed: ${items.join(' · ')}</div>`
         : '';
+
+      // Flagged content summary
+      const byType = {};
+      const byTarget = {};
+      (pendingReports || []).forEach(r => {
+        byType[r.type] = (byType[r.type] || 0) + 1;
+        const key = r.type + ':' + r.target_id;
+        byTarget[key] = (byTarget[key] || 0) + 1;
+      });
+      const multiReported = Object.values(byTarget).filter(c => c >= 2).length;
+      const totalPending  = (pendingReports || []).length;
+
+      const flaggedEl = document.getElementById('flagged-section');
+      if (totalPending === 0) {
+        flaggedEl.innerHTML = `
+          <div class="card" style="display:flex;align-items:center;gap:12px;padding:14px 18px">
+            <div style="font-size:22px">✅</div>
+            <div style="color:var(--muted);font-size:13px">No pending reports — all clear.</div>
+          </div>`;
+      } else {
+        const typeRows = ['profile','bounty','event','offer']
+          .filter(t => byType[t])
+          .map(t => {
+            const icon  = t === 'profile' ? '👤' : t === 'bounty' ? '🎯' : t === 'event' ? '📅' : '🏷️';
+            const label = t === 'bounty'  ? 'Chase' : t[0].toUpperCase() + t.slice(1);
+            return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+              <span style="font-size:16px">${icon}</span>
+              <span style="flex:1;font-size:13px">${label} reports</span>
+              <span class="badge badge-red">${byType[t]}</span>
+            </div>`;
+          }).join('');
+
+        flaggedEl.innerHTML = `
+          <div class="card" style="padding:0;overflow:hidden">
+            <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+              <div style="font-weight:700;font-size:14px">🚩 ${totalPending} pending report${totalPending > 1 ? 's' : ''}</div>
+              ${multiReported > 0
+                ? `<span class="badge badge-red">${multiReported} item${multiReported > 1 ? 's' : ''} with 2+ reports</span>`
+                : ''}
+            </div>
+            <div style="padding:0 18px">
+              ${typeRows}
+            </div>
+            <div style="padding:12px 18px">
+              <a href="./reports.html" class="btn btn-ghost btn-sm" style="text-decoration:none">Review all reports →</a>
+            </div>
+          </div>`;
+      }
 
       // Badge counts for nav
       renderNav('dashboard', {
